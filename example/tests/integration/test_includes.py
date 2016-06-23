@@ -1,6 +1,7 @@
 import pytest
 from django.urls import reverse
 
+import mock
 pytestmark = pytest.mark.django_db
 
 
@@ -8,6 +9,10 @@ def test_default_included_data_on_list(multiple_entries, client):
     return test_included_data_on_list(
         multiple_entries=multiple_entries, client=client, query='?page_size=5'
     )
+
+
+def test_included_data_on_list(multiple_entries, client, query='?include=comments&page_size=5'):
+    response = client.get(reverse("entry-list") + query)
 
 
 def test_included_data_on_list(multiple_entries, client, query='?include=comments&page_size=5'):
@@ -26,10 +31,13 @@ def test_included_data_on_list(multiple_entries, client, query='?include=comment
     assert comment_count == expected_comment_count, 'List comment count is incorrect'
 
 
+@mock.patch('rest_framework_json_api.utils.get_default_included_resources_from_serializer', new=lambda s: ['comments'])
 def test_default_included_data_on_detail(single_entry, client):
     return test_included_data_on_detail(single_entry=single_entry, client=client, query='')
 
 
+def test_included_data_on_detail(single_entry, client, query='?include=comments'):
+    response = client.get(reverse("entry-detail", kwargs={'pk': single_entry.pk}) + query)
 def test_included_data_on_detail(single_entry, client, query='?include=comments'):
     response = client.get(reverse("entry-detail", kwargs={'pk': single_entry.pk}) + query)
     included = response.json().get('included')
