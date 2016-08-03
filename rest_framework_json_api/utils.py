@@ -490,3 +490,29 @@ def format_errors(data):
     if len(data) > 1 and isinstance(data, list):
         data.sort(key=lambda x: x.get('source', {}).get('pointer', ''))
     return {'errors': data}
+
+
+def inner_key_in_dict(dict_, *nested_key):
+    """ Checks if nested dictionaries contain specified key
+
+    Args:
+        dict_: nested dictionary structure
+         {
+            key1: {
+                key2: {
+                    ...
+                }
+            }
+         }
+        *nested_key: nested key to be checked
+            key1, key2
+
+    Returns: True/False
+    """
+    inner_dict = dict_
+    try:
+        for key in nested_key:
+            inner_dict = inner_dict[key]
+    except KeyError:
+        return False
+    return True
