@@ -2,10 +2,21 @@ from django.utils.translation import ugettext_lazy as _
 from rest_framework.exceptions import ParseError
 from rest_framework.serializers import *
 
+from rest_framework_json_api.helpers import ResourceIdentifier
 from rest_framework_json_api.relations import ResourceRelatedField
 from rest_framework_json_api.utils import (
     get_resource_type_from_model, get_resource_type_from_instance,
     get_resource_type_from_serializer, get_included_serializers)
+
+
+class ResourceIdentifierSerializer(Serializer):
+    """ Serializer for 'pointers' to resources in the JSON document """
+    id = CharField(max_length=64)
+    type = CharField(max_length=256)
+
+    def to_internal_value(self, data):
+        ret = super(ResourceIdentifierSerializer, self).to_internal_value(data)
+        return ResourceIdentifier(ret['type'], ret['id'])
 
 
 class ResourceIdentifierObjectSerializer(BaseSerializer):
@@ -99,6 +110,41 @@ class IncludedResourcesValidationMixin(object):
                     validate_path(this_serializer_class, included_field_path, included_field_name)
 
         super(IncludedResourcesValidationMixin, self).__init__(*args, **kwargs)
+
+
+class IncludedResourcesMixin(object):
+    """
+    Mixin for serializer representing included resources in JSON document ("included" key)
+    Included resources are stored in included_resource_map attribute
+    """
+    @staticmethod
+    def create_resource_map(resource_name, included_data):
+        result = {}
+        for resource in included_data.get(resource_name, []):
+            result[resource['id']] = resource
+        return result
+
+    def __init__(self, **kwargs):
+        self.included_resource_map = {}
+        return super(IncludedResourcesMixin, self).__init__(**kwargs)
+
+    def to_internal_value(self, data):
+        ret = super(IncludedResourcesMixin, self).to_internal_value(data)
+        for field in self._writable_fields:
+            self.included_resource_map[field.source] = self.create_resource_map(field.field_name, ret)
+        return ret
+
+
+class IncludingResourcesMixin(object):
+    """
+    Mixin for serializer of JSON document that includes other resources using "included" key
+    Included resources can be accessed using included_resource_map property
+
+    Serializer has to contain Serializer with IncludedResourcesMixin in "_included" field
+    """
+    @property
+    def included_resource_map(self):
+        return self.fields['_included'].included_resource_map if '_included' in self.fields else {}
 
 
 class HyperlinkedModelSerializer(IncludedResourcesValidationMixin, SparseFieldsetsMixin, HyperlinkedModelSerializer):
