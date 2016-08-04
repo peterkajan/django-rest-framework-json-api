@@ -60,13 +60,13 @@ if sys.argv[-1] == 'publish':
 
 
 setup(
-    name='djangorestframework-jsonapi',
+    name='djangorestframework-jsonapi-kajan',
     version=get_version('rest_framework_json_api'),
-    url='https://github.com/django-json-api/django-rest-framework-json-api',
+    url='https://github.com/peterkajan/django-rest-framework-json-api',
     license='MIT',
     description='A Django REST framework API adapter for the json-api spec.',
     long_description=read('README.rst'),
-    author='Jerel Unruh',
+    author='Peter Kajan',
     author_email='',
     packages=get_packages('rest_framework_json_api'),
     package_data=get_package_data('rest_framework_json_api'),
