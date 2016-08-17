@@ -67,7 +67,7 @@ setup(
     description='A Django REST framework API adapter for the json-api spec.',
     long_description=read('README.rst'),
     author='Peter Kajan',
-    author_email='',
+    author_email='peter.kajan@infinit.sk',
     packages=get_packages('rest_framework_json_api'),
     package_data=get_package_data('rest_framework_json_api'),
     install_requires=[
