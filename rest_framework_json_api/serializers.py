@@ -14,9 +14,23 @@ class ResourceIdentifierSerializer(Serializer):
     id = CharField(max_length=64)
     type = CharField(max_length=256)
 
+    default_error_messages = {
+        'wrong_type': _('Expected resource of following types: {expected_types}. Got {received_type}.'),
+    }
+
+    def __init__(self, *args, **kwargs):
+        self.expected_types = kwargs.pop('expected_types', None)
+        super(ResourceIdentifierSerializer, self).__init__(*args, **kwargs)
+
     def to_internal_value(self, data):
         ret = super(ResourceIdentifierSerializer, self).to_internal_value(data)
         return ResourceIdentifier(ret['type'], ret['id'])
+
+    def validate_type(self, resource_type):
+        if self.expected_types is not None and resource_type not in self.expected_types:
+            raise ValidationError(self.error_messages['wrong_type'].format(expected_types=self.expected_types,
+                                                                           received_type=resource_type))
+        return resource_type
 
 
 class ResourceIdentifierObjectSerializer(BaseSerializer):
