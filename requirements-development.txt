@@ -1,7 +1,7 @@
 -e .
-pytest==2.8.2
+pytest==2.9
 pytest-django
 pytest-factoryboy
-fake-factory
+fake-factory==0.7.4
 tox
 mock

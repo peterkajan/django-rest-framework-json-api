@@ -21,7 +21,29 @@ class BlogSerializer(serializers.ModelSerializer):
         meta_fields = ('copyright',)
 
 
-class EntrySerializer(serializers.ModelSerializer):
+class AuthorBioSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = AuthorBio
+        fields = ('author', 'body',)
+
+
+class AuthorSerializer(serializers.ModelSerializer):
+    included_serializers = {
+        'bio': AuthorBioSerializer
+    }
+
+    class Meta:
+        model = Author
+        fields = ('name', 'email', 'bio')
+
+
+class IncludedEntrySerializer(serializers.IncludedResourcesMixin, serializers.Serializer):
+    blogs = BlogSerializer(many=True, required=False)
+    authors = AuthorSerializer(many=True, required=False)
+
+
+class EntrySerializer(serializers.IncludingResourcesMixin, serializers.ModelSerializer):
 
     def __init__(self, *args, **kwargs):
         # to make testing more concise we'll only output the
@@ -36,6 +58,7 @@ class EntrySerializer(serializers.ModelSerializer):
         'comments': 'example.serializers.CommentSerializer',
         'featured': 'example.serializers.EntrySerializer',
     }
+    _included = IncludedEntrySerializer(write_only=True)
 
     body_format = serializers.SerializerMethodField()
     # many related from model
@@ -60,25 +83,8 @@ class EntrySerializer(serializers.ModelSerializer):
     class Meta:
         model = Entry
         fields = ('blog', 'headline', 'body_text', 'pub_date', 'mod_date',
-                  'authors', 'comments', 'featured', 'suggested',)
+                  'authors', 'comments', 'featured', 'suggested', '_included')
         meta_fields = ('body_format',)
-
-
-class AuthorBioSerializer(serializers.ModelSerializer):
-
-    class Meta:
-        model = AuthorBio
-        fields = ('author', 'body',)
-
-
-class AuthorSerializer(serializers.ModelSerializer):
-    included_serializers = {
-        'bio': AuthorBioSerializer
-    }
-
-    class Meta:
-        model = Author
-        fields = ('name', 'email', 'bio')
 
 
 class CommentSerializer(serializers.ModelSerializer):
