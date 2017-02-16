@@ -222,19 +222,15 @@ class CommentSerializer(serializers.ModelSerializer):
         model = Comment
         exclude = ('created_at', 'modified_at',)
         # fields = ('entry', 'body', 'author',)
-
-
 class ArtProjectSerializer(serializers.ModelSerializer):
     class Meta:
         model = ArtProject
         exclude = ('polymorphic_ctype',)
 
-
 class ResearchProjectSerializer(serializers.ModelSerializer):
     class Meta:
         model = ResearchProject
         exclude = ('polymorphic_ctype',)
-
 
 class ProjectSerializer(serializers.PolymorphicModelSerializer):
     polymorphic_serializers = [ArtProjectSerializer, ResearchProjectSerializer]
