@@ -101,30 +101,58 @@ class GenericViewSet(TestBase):
 
         assert expected_dump == content_dump
 
-    def test_custom_validation_exceptions(self):
+    def test_validation_exceptions_with_included(self):
         """
         Exceptions should be able to be formatted manually
         """
-        expected = {
-            'errors': [
+        expected_error = {
+            'status': '400',
+            'meta': {
+                'source': '/included/authors/1/bio',
+            },
+            'detail': 'This field is required.',
+        }
+        response = self.client.post('/entries', dump_json({
+            'data': {
+                'type': 'posts',
+                'id': 1,
+                'attributes': {
+                    'headline': 'A headline',
+                    'body_text': 'A body text',
+                },
+                'relationships': {
+                    'blog': {
+                        'data': {
+                            'type': 'blogs',
+                            'id': 1,
+                        },
+                    },
+                    'authors': {
+                        'data': [{
+                            'type': 'authors',
+                            'id': 1,
+                        }]
+                    }
+                },
+            },
+            'included': [
                 {
-                    'id': 'armageddon101',
-                    'detail': 'Hey! You need a last name!',
-                    'meta': 'something',
+                    'type': 'blogs',
+                    'id': 1,
+                    'attributes': {
+                        'name': 'A blog name',
+                        'tagline': 'A blog tagline',
+                    },
                 },
                 {
-                    'status': '400',
-                    'source': {
-                        'pointer': '/data/attributes/email',
+                    'type': 'authors',
+                    'id': 1,
+                    'attributes': {
+                        'name': 'Author name',
+                        'email': 'author@example.org',
                     },
-                    'detail': 'Enter a valid email address.',
                 },
             ]
-        }
-        response = self.client.post('/identities', {
-            'email': 'bar', 'last_name': 'alajflajaljalajlfjafljalj'})
+        }), content_type='application/vnd.api+json')
 
-        content_dump = redump_json(response.content)
-        expected_dump = dump_json(expected)
-
-        assert expected_dump == content_dump
+        assert expected_error in json.loads(response.content)['errors']
