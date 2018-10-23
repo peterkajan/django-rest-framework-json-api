@@ -116,3 +116,60 @@ class GenericViewSet(TestBase):
         })
 
         assert expected == response.json()
+
+    def test_validation_exceptions_with_included(self):
+        """
+        Exceptions should be able to be formatted manually
+        """
+        expected_error = {
+            'status': '400',
+            'meta': {
+                'source': '/included/authors/1/bio',
+            },
+            'detail': 'This field is required.',
+        }
+        response = self.client.post('/entries', dump_json({
+            'data': {
+                'type': 'posts',
+                'id': 1,
+                'attributes': {
+                    'headline': 'A headline',
+                    'body_text': 'A body text',
+                },
+                'relationships': {
+                    'blog': {
+                        'data': {
+                            'type': 'blogs',
+                            'id': 1,
+                        },
+                    },
+                    'authors': {
+                        'data': [{
+                            'type': 'authors',
+                            'id': 1,
+                        }]
+                    }
+                },
+            },
+            'included': [
+                {
+                    'type': 'blogs',
+                    'id': 1,
+                    'attributes': {
+                        'name': 'A blog name',
+                        'tagline': 'A blog tagline',
+                    },
+                },
+                {
+                    'type': 'authors',
+                    'id': 1,
+                    'attributes': {
+                        'name': 'Author name',
+                        'email': 'author@example.org',
+                    },
+                },
+            ]
+        }), content_type='application/vnd.api+json')
+
+        assert expected_error in json.loads(response.content)['errors']
+

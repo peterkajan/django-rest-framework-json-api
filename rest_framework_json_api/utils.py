@@ -391,6 +391,25 @@ class Hyperlink(six.text_type):
     is_hyperlink = True
 
 
+def _format_nested_error(obj, source, **kwargs):
+    errors = []
+    if isinstance(obj, dict):
+        for field, value in obj.items():
+            errors.extend(_format_nested_error(value, source='%s/%s' % (source, field),
+                                              **kwargs))
+    elif isinstance(obj, list):
+        for value in obj:
+            errors.extend(_format_nested_error(value, source=source, **kwargs))
+    else:
+        errors.append(dict({
+            'detail': obj,
+            'meta': {
+                'source': source,
+            },
+        }, **kwargs))
+    return errors
+
+
 def format_drf_errors(response, context, exc):
     errors = []
     # handle generic errors. ValidationError('test') in a view for example
@@ -410,7 +429,20 @@ def format_drf_errors(response, context, exc):
             pointer = '/data/attributes/{}'.format(field)
             # see if they passed a dictionary to ValidationError manually
             if isinstance(error, dict):
-                errors.append(error)
+                if field == '-included':
+                    for type, nested_errors in error.items():
+                        for index, nested_error in enumerate(nested_errors):
+                            try:
+                                identifier = '%s/%s' % (type, context['request'].data['_included'][type][index]['id'])
+                            except KeyError, IndexError:
+                                identifier = '%s' % type
+                            errors.extend(_format_nested_error(nested_error,
+                                                               status=encoding.force_text(response.status_code),
+                                                               source='/included/%s' % identifier))
+                else:
+                    errors.extend(_format_nested_error(error,
+                                                       status=encoding.force_text(response.status_code),
+                                                       source='/data/%s' % field))
             elif isinstance(error, six.string_types):
                 classes = inspect.getmembers(exceptions, inspect.isclass)
                 # DRF sets the `field` to 'detail' for its own exceptions
