@@ -340,13 +340,6 @@ def get_default_included_resources_from_serializer(serializer):
     return list(getattr(meta, 'included_resources', []))
 
 
-def get_default_included_resources_from_serializer(serializer):
-    try:
-        return list(serializer.JSONAPIMeta.included_resources)
-    except AttributeError:
-        return []
-
-
 def get_included_serializers(serializer):
     included_serializers = copy.copy(getattr(serializer, 'included_serializers', dict()))
 

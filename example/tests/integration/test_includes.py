@@ -13,10 +13,6 @@ def test_default_included_data_on_list(multiple_entries, client):
 
 def test_included_data_on_list(multiple_entries, client, query='?include=comments&page_size=5'):
     response = client.get(reverse("entry-list") + query)
-
-
-def test_included_data_on_list(multiple_entries, client, query='?include=comments&page_size=5'):
-    response = client.get(reverse("entry-list") + query)
     included = response.json().get('included')
 
     assert len(response.json()['data']) == len(multiple_entries), (
