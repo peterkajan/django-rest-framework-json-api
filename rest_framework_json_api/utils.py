@@ -440,9 +440,7 @@ def format_drf_errors(response, context, exc):
                                                                status=encoding.force_text(response.status_code),
                                                                source='/included/%s' % identifier))
                 else:
-                    errors.extend(_format_nested_error(error,
-                                                       status=encoding.force_text(response.status_code),
-                                                       source='/data/%s' % field))
+                    errors.append(error)
             elif isinstance(error, six.string_types):
                 classes = inspect.getmembers(exceptions, inspect.isclass)
                 # DRF sets the `field` to 'detail' for its own exceptions
