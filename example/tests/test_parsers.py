@@ -62,3 +62,56 @@ class TestJSONParser(TestCase):
 
         with self.assertRaises(ParseError):
             parser.parse(stream, None, self.parser_context)
+
+    def test_parse_with_included(self):
+        """ test parsing of incoming JSON which includes referenced entities """
+        class ViewMock(object):
+            resource_name = 'author-bios'
+
+        parser = JSONParser()
+        request_data = {
+            "data": {
+                "type": "author-bios",
+                "id": "author-bio-1",
+                "attributes": {
+                    "body": "This author is cool",
+                },
+                "relationships": {
+                    "author": {
+                        "data": {
+                            "type": "authors",
+                            "id": "author-1"
+                        }
+                    },
+                }
+            },
+            "included": [{
+                "type": "authors",
+                "id": "author-1",
+                "attributes": {
+                    "name": "Homer Simpson",
+                    "email": "homer@simpson.com"
+                },
+            }]
+        }
+
+        stream = BytesIO(json.dumps(request_data).encode('utf-8'))
+        result_data = parser.parse(stream, parser_context={'view': ViewMock(), 
+                                                           'request': self.parser_context['request']})
+
+        expected_data = {
+            'id': 'author-bio-1',
+            'body': 'This author is cool',
+            'author': {
+                'type': 'authors',
+                'id': 'author-1'
+            },
+            '_included': {
+                'authors': [{
+                    'id': 'author-1',
+                    'name': 'Homer Simpson',
+                    'email': 'homer@simpson.com',
+                }]
+            },
+        }
+        self.assertEqual(result_data, expected_data)
