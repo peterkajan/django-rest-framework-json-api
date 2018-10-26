@@ -3,7 +3,6 @@ from django.urls import reverse
 
 from example.tests import TestBase
 
-
 @override_settings(JSON_API_FORMAT_FIELD_NAMES='dasherize')
 class GenericViewSet(TestBase):
     """
@@ -114,7 +113,6 @@ class GenericViewSet(TestBase):
                 }
             }
         })
-
         assert expected == response.json()
 
     def test_validation_exceptions_with_included(self):
@@ -128,7 +126,7 @@ class GenericViewSet(TestBase):
             },
             'detail': 'This field is required.',
         }
-        response = self.client.post('/entries', dump_json({
+        response = self.client.post('/entries', {
             'data': {
                 'type': 'posts',
                 'id': 1,
@@ -169,7 +167,7 @@ class GenericViewSet(TestBase):
                     },
                 },
             ]
-        }), content_type='application/vnd.api+json')
+        })
 
-        assert expected_error in json.loads(response.content)['errors']
+        assert expected_error in response.json()['errors']
 
