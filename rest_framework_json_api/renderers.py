@@ -579,12 +579,6 @@ class JSONRenderer(renderers.JSONRenderer):
         serializer = getattr(serializer_data, 'serializer', None)
 
         # Build a list of included resources
-        include_resources_param = request.query_params.get('include') if request else None
-        if include_resources_param:
-            included_resources = include_resources_param.split(',')
-        else:
-            included_resources = utils.get_default_included_resources_from_serializer(serializer)
-
         included_resources = utils.get_included_resources(request, serializer)
 
         if serializer is not None:
