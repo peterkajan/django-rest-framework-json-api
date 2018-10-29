@@ -3,6 +3,7 @@ from django.db.models.query import QuerySet
 from django.utils.translation import ugettext_lazy as _
 from rest_framework.exceptions import ParseError
 from rest_framework.serializers import *  # noqa: F403
+from rest_framework.fields import Field
 
 from rest_framework_json_api.helpers import ResourceIdentifier
 from rest_framework_json_api.exceptions import Conflict
@@ -16,7 +17,7 @@ from rest_framework_json_api.utils import (
 )
 
 
-class ResourceIdentifierSerializer(Serializer):
+class ResourceIdentifierField(Field):
     """ Serializer for 'pointers' to resources in the JSON document """
     id = CharField(max_length=64)
     type = CharField(max_length=256)
@@ -27,11 +28,10 @@ class ResourceIdentifierSerializer(Serializer):
 
     def __init__(self, *args, **kwargs):
         self.expected_types = kwargs.pop('expected_types', None)
-        super(ResourceIdentifierSerializer, self).__init__(*args, **kwargs)
+        super(ResourceIdentifierField, self).__init__(*args, **kwargs)
 
     def to_internal_value(self, data):
-        ret = super(ResourceIdentifierSerializer, self).to_internal_value(data)
-        return ResourceIdentifier(ret['type'], ret['id'])
+        return ResourceIdentifier(data['type'], data['id'])
 
     def validate_type(self, resource_type):
         if self.expected_types is not None and resource_type not in self.expected_types:
