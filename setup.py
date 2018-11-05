@@ -67,15 +67,16 @@ if sys.argv[-1] == 'publish':
     print("  git push --tags")
     sys.exit()
 
+
 setup(
-    name='djangorestframework-jsonapi',
+    name='djangorestframework-jsonapi-kajan',
     version=get_version('rest_framework_json_api'),
-    url='https://github.com/django-json-api/django-rest-framework-json-api',
+    url='https://github.com/peterkajan/django-rest-framework-json-api',
     license='MIT',
     description='A Django REST framework API adapter for the JSON API spec.',
     long_description=read('README.rst'),
-    author='Jerel Unruh',
-    author_email='',
+    author='Peter Kajan',
+    author_email='peter.kajan@infinit.sk',
     packages=get_packages('rest_framework_json_api'),
     package_data=get_package_data('rest_framework_json_api'),
     classifiers=[
