@@ -1,14 +1,13 @@
-import json
-
+import pytest
 from django.contrib.auth import get_user_model
+from django.test import override_settings
+from django.urls import reverse
 from django.utils import encoding
-from django.core.urlresolvers import reverse
-from django.conf import settings
 
 from example.tests import TestBase
-from example.tests.utils import dump_json, redump_json
 
 
+@override_settings(JSON_API_FORMAT_FIELD_NAMES='dasherize')
 class ModelViewSetTests(TestBase):
     """
     Test usage with ModelViewSets, also tests pluralization, camelization,
@@ -22,12 +21,6 @@ class ModelViewSetTests(TestBase):
     def setUp(self):
         super(ModelViewSetTests, self).setUp()
         self.detail_url = reverse('user-detail', kwargs={'pk': self.miles.pk})
-
-        setattr(settings, 'JSON_API_FORMAT_KEYS', 'dasherize')
-
-    def tearDown(self):
-
-        setattr(settings, 'JSON_API_FORMAT_KEYS', 'camelize')
 
     def test_key_in_list_result(self):
         """
@@ -64,10 +57,7 @@ class ModelViewSetTests(TestBase):
             }
         }
 
-        content_dump = redump_json(response.content)
-        expected_dump = dump_json(expected)
-
-        assert expected_dump == content_dump
+        assert expected == response.json()
 
     def test_page_two_in_list_result(self):
         """
@@ -80,14 +70,14 @@ class ModelViewSetTests(TestBase):
         expected = {
             'data': [
                 {
-                'type': 'users',
-                'id': encoding.force_text(user.pk),
-                'attributes': {
-                    'first-name': user.first_name,
-                    'last-name': user.last_name,
-                    'email': user.email
-                },
-            }
+                    'type': 'users',
+                    'id': encoding.force_text(user.pk),
+                    'attributes': {
+                        'first-name': user.first_name,
+                        'last-name': user.last_name,
+                        'email': user.email
+                    },
+                }
             ],
             'links': {
                 'first': 'http://testserver/identities?page=1',
@@ -104,10 +94,7 @@ class ModelViewSetTests(TestBase):
             }
         }
 
-        content_dump = redump_json(response.content)
-        expected_dump = dump_json(expected)
-
-        assert expected_dump == content_dump
+        assert expected == response.json()
 
     def test_page_range_in_list_result(self):
         """
@@ -155,10 +142,7 @@ class ModelViewSetTests(TestBase):
             }
         }
 
-        content_dump = redump_json(response.content)
-        expected_dump = dump_json(expected)
-
-        assert expected_dump == content_dump
+        assert expected == response.json()
 
     def test_key_in_detail_result(self):
         """
@@ -179,10 +163,7 @@ class ModelViewSetTests(TestBase):
             }
         }
 
-        content_dump = redump_json(response.content)
-        expected_dump = dump_json(expected)
-
-        assert expected_dump == content_dump
+        assert expected == response.json()
 
     def test_patch_requires_id(self):
         """
@@ -197,9 +178,7 @@ class ModelViewSetTests(TestBase):
             }
         }
 
-        response = self.client.patch(self.detail_url,
-                                     content_type='application/vnd.api+json',
-                                     data=dump_json(data))
+        response = self.client.patch(self.detail_url, data=data)
 
         self.assertEqual(response.status_code, 400)
 
@@ -220,16 +199,37 @@ class ModelViewSetTests(TestBase):
             }
         }
 
-        response = self.client.put(self.detail_url,
-                                   content_type='application/vnd.api+json',
-                                   data=dump_json(data))
+        response = self.client.put(self.detail_url, data=data)
 
-        content_dump = redump_json(response.content)
-        expected_dump = dump_json(data)
-
-        assert expected_dump == content_dump
+        assert data == response.json()
 
         # is it updated?
         self.assertEqual(
             get_user_model().objects.get(pk=self.miles.pk).email,
             'miles@trumpet.org')
+
+
+@pytest.mark.django_db
+def test_patch_allow_field_type(author, author_type_factory, client):
+    """
+    Verify that type field may be updated.
+    """
+    author_type = author_type_factory()
+    url = reverse('author-detail', args=[author.id])
+
+    data = {
+        'data': {
+            'id': author.id,
+            'type': 'authors',
+            'relationships': {
+                'data': {
+                    'id': author_type.id,
+                    'type': 'author-type'
+                }
+            }
+        }
+    }
+
+    response = client.patch(url, data=data)
+
+    assert response.status_code == 200

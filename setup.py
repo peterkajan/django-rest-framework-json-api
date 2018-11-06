@@ -1,11 +1,20 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
+from __future__ import print_function
 
-import re
 import os
+import re
 import sys
 
 from setuptools import setup
+
+needs_mock = sys.version_info < (3, 3)
+mock = ['mock'] if needs_mock else []
+needs_pytest = {'pytest', 'test', 'ptr'}.intersection(sys.argv)
+pytest_runner = ['pytest-runner'] if needs_pytest else []
+needs_sphinx = {'build_sphinx', 'upload_docs'}.intersection(sys.argv)
+sphinx = ['sphinx'] if needs_sphinx else []
+needs_wheel = {'bdist_wheel'}.intersection(sys.argv)
+wheel = ['wheel'] if needs_wheel else []
 
 
 def read(*paths):
@@ -64,17 +73,12 @@ setup(
     version=get_version('rest_framework_json_api'),
     url='https://github.com/peterkajan/django-rest-framework-json-api',
     license='MIT',
-    description='A Django REST framework API adapter for the json-api spec.',
+    description='A Django REST framework API adapter for the JSON API spec.',
     long_description=read('README.rst'),
     author='Peter Kajan',
     author_email='peter.kajan@infinit.sk',
     packages=get_packages('rest_framework_json_api'),
     package_data=get_package_data('rest_framework_json_api'),
-    install_requires=[
-        'django',
-        'djangorestframework>=3.1.0',
-        'inflection>=0.3.0'
-    ],
     classifiers=[
         'Development Status :: 5 - Production/Stable',
         'Environment :: Web Environment',
@@ -86,11 +90,29 @@ setup(
         'Programming Language :: Python :: 2',
         'Programming Language :: Python :: 2.7',
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.2',
-        'Programming Language :: Python :: 3.3',
         'Programming Language :: Python :: 3.4',
+        'Programming Language :: Python :: 3.5',
+        'Programming Language :: Python :: 3.6',
         'Topic :: Internet :: WWW/HTTP',
         'Topic :: Software Development :: Libraries :: Application Frameworks',
         'Topic :: Software Development :: Libraries :: Python Modules',
-    ]
+    ],
+    install_requires=[
+        'inflection>=0.3.0',
+        'djangorestframework>=3.6.3',
+        'django>=1.11',
+        'six',
+    ],
+    setup_requires=pytest_runner + sphinx + wheel,
+    tests_require=[
+        'pytest-factoryboy',
+        'factory-boy',
+        'pytest-django',
+        'pytest',
+        'pytest-cov',
+        'django-polymorphic>=2.0',
+        'packaging',
+        'django-debug-toolbar'
+    ] + mock,
+    zip_safe=False,
 )

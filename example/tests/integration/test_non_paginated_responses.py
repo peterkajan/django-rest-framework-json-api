@@ -1,18 +1,19 @@
-from django.core.urlresolvers import reverse
-from django.conf import settings
-
 import pytest
+from django.urls import reverse
 
-from example.views import EntryViewSet
-from rest_framework_json_api.pagination import PageNumberPagination
-
-from example.tests.utils import dump_json, redump_json
+try:
+    from unittest import mock
+except ImportError:
+    import mock
 
 pytestmark = pytest.mark.django_db
 
 
-# rf == request_factory
-def test_multiple_entries_no_pagination(multiple_entries, rf):
+@mock.patch(
+    'rest_framework_json_api.utils'
+    '.get_default_included_resources_from_serializer',
+    new=lambda s: [])
+def test_multiple_entries_no_pagination(multiple_entries, client):
 
     expected = {
         "data": [
@@ -34,6 +35,12 @@ def test_multiple_entries_no_pagination(multiple_entries, rf):
                     "blog": {
                         "data": {"type": "blogs", "id": "1"}
                     },
+                    "blogHyperlinked": {
+                        "links": {
+                            "related": "http://testserver/entries/1/blog",
+                            "self": "http://testserver/entries/1/relationships/blog_hyperlinked"
+                        }
+                    },
                     "authors": {
                         "meta": {"count": 1},
                         "data": [{"type": "authors", "id": "1"}]
@@ -42,8 +49,34 @@ def test_multiple_entries_no_pagination(multiple_entries, rf):
                         "meta": {"count": 1},
                         "data": [{"type": "comments", "id": "1"}]
                     },
+                    "commentsHyperlinked": {
+                        "links": {
+                            "related": "http://testserver/entries/1/comments",
+                            "self": "http://testserver/entries/1/relationships/comments_hyperlinked"
+                        }
+                    },
                     "suggested": {
-                        "data": [{"type": "entries", "id": "2"}]
+                        "data": [{"type": "entries", "id": "2"}],
+                        "links": {
+                            "related": "http://testserver/entries/1/suggested/",
+                            "self": "http://testserver/entries/1/relationships/suggested"
+                        }
+                    },
+                    "suggestedHyperlinked": {
+                        "links": {
+                            "related": "http://testserver/entries/1/suggested/",
+                            "self": "http://testserver/entries/1"
+                                    "/relationships/suggested_hyperlinked"
+                        }
+                    },
+                    "featuredHyperlinked": {
+                        "links": {
+                            "related": "http://testserver/entries/1/featured",
+                            "self": "http://testserver/entries/1/relationships/featured_hyperlinked"
+                        }
+                    },
+                    "tags": {
+                        "data": []
                     }
                 }
             },
@@ -65,6 +98,12 @@ def test_multiple_entries_no_pagination(multiple_entries, rf):
                     "blog": {
                         "data": {"type": "blogs", "id": "2"}
                     },
+                    "blogHyperlinked": {
+                        "links": {
+                            "related": "http://testserver/entries/2/blog",
+                            "self": "http://testserver/entries/2/relationships/blog_hyperlinked",
+                        }
+                    },
                     "authors": {
                         "meta": {"count": 1},
                         "data": [{"type": "authors", "id": "2"}]
@@ -73,27 +112,40 @@ def test_multiple_entries_no_pagination(multiple_entries, rf):
                         "meta": {"count": 1},
                         "data": [{"type": "comments", "id": "2"}]
                     },
+                    "commentsHyperlinked": {
+                        "links": {
+                            "related": "http://testserver/entries/2/comments",
+                            "self": "http://testserver/entries/2/relationships/comments_hyperlinked"
+                        }
+                    },
                     "suggested": {
-                        "data": [{"type": "entries", "id": "1"}]
+                        "data": [{"type": "entries", "id": "1"}],
+                        "links": {
+                            "related": "http://testserver/entries/2/suggested/",
+                            "self": "http://testserver/entries/2/relationships/suggested"
+                        }
+                    },
+                    "suggestedHyperlinked": {
+                        "links": {
+                            "related": "http://testserver/entries/2/suggested/",
+                            "self": "http://testserver/entries/2"
+                                    "/relationships/suggested_hyperlinked"
+                        }
+                    },
+                    "featuredHyperlinked": {
+                        "links": {
+                            "related": "http://testserver/entries/2/featured",
+                            "self": "http://testserver/entries/2/relationships/featured_hyperlinked"
+                        }
+                    },
+                    "tags": {
+                        "data": []
                     }
                 }
             },
         ]
     }
 
-    class NoPagination(PageNumberPagination):
-        page_size = None
+    response = client.get(reverse("nopage-entry-list"))
 
-    class NonPaginatedEntryViewSet(EntryViewSet):
-        pagination_class = NoPagination
-
-    request = rf.get(
-        reverse("entry-list"))
-    view = NonPaginatedEntryViewSet.as_view({'get': 'list'})
-    response = view(request)
-    response.render()
-
-    content_dump = redump_json(response.content)
-    expected_dump = dump_json(expected)
-
-    assert content_dump == expected_dump
+    assert expected == response.json()

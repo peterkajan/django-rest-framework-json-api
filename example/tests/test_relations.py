@@ -1,14 +1,23 @@
 from __future__ import absolute_import
 
+from django.test.client import RequestFactory
 from django.utils import timezone
 from rest_framework import serializers
+from rest_framework.fields import SkipField
+from rest_framework.reverse import reverse
+
+from rest_framework_json_api.exceptions import Conflict
+from rest_framework_json_api.relations import (
+    HyperlinkedRelatedField,
+    ResourceRelatedField,
+    SerializerMethodHyperlinkedRelatedField
+)
+from rest_framework_json_api.utils import format_resource_type
 
 from . import TestBase
-from rest_framework_json_api.exceptions import Conflict
-from rest_framework_json_api.utils import format_resource_type
-from example.models import Blog, Entry, Comment, Author
+from example.models import Author, Blog, Comment, Entry
 from example.serializers import CommentSerializer
-from rest_framework_json_api.relations import ResourceRelatedField
+from example.views import EntryViewSet
 
 
 class TestResourceRelatedField(TestBase):
@@ -26,7 +35,7 @@ class TestResourceRelatedField(TestBase):
             n_pingbacks=0,
             rating=3
         )
-        for i in range(1,6):
+        for i in range(1, 6):
             name = 'some_author{}'.format(i)
             self.entry.authors.add(
                 Author.objects.create(name=name, email='{}@example.org'.format(name))
@@ -82,7 +91,7 @@ class TestResourceRelatedField(TestBase):
                     'id': str(self.blog.id)
                 }
             }
-                                          )
+            )
             serializer.is_valid()
         the_exception = cm.exception
         self.assertEqual(the_exception.status_code, 409)
@@ -104,7 +113,7 @@ class TestResourceRelatedField(TestBase):
         author_pks = Author.objects.values_list('pk', flat=True)
         authors = [{'type': type_string, 'id': pk} for pk in author_pks]
 
-        serializer = EntryModelSerializer(data={'authors': authors, 'comment_set': []})
+        serializer = EntryModelSerializer(data={'authors': authors, 'comments': []})
 
         self.assertTrue(serializer.is_valid())
         self.assertEqual(len(serializer.validated_data['authors']), Author.objects.count())
@@ -112,9 +121,11 @@ class TestResourceRelatedField(TestBase):
             self.assertIsInstance(author, Author)
 
     def test_read_only(self):
-        serializer = EntryModelSerializer(data={'authors': [], 'comment_set': [{'type': 'Comments', 'id': 2}]})
+        serializer = EntryModelSerializer(
+            data={'authors': [], 'comments': [{'type': 'Comments', 'id': 2}]}
+        )
         serializer.is_valid(raise_exception=True)
-        self.assertNotIn('comment_set', serializer.validated_data)
+        self.assertNotIn('comments', serializer.validated_data)
 
     def test_invalid_resource_id_object(self):
         comment = {'body': 'testing 123', 'entry': {'type': 'entry'}, 'author': {'id': '5'}}
@@ -126,8 +137,138 @@ class TestResourceRelatedField(TestBase):
         }
 
 
+class TestHyperlinkedFieldBase(TestBase):
+
+    def setUp(self):
+        super(TestHyperlinkedFieldBase, self).setUp()
+        self.blog = Blog.objects.create(name='Some Blog', tagline="It's a blog")
+        self.entry = Entry.objects.create(
+            blog=self.blog,
+            headline='headline',
+            body_text='body_text',
+            pub_date=timezone.now(),
+            mod_date=timezone.now(),
+            n_comments=0,
+            n_pingbacks=0,
+            rating=3
+        )
+        self.comment = Comment.objects.create(
+            entry=self.entry,
+            body='testing one two three',
+        )
+
+        self.request = RequestFactory().get(reverse('entry-detail', kwargs={'pk': self.entry.pk}))
+        self.view = EntryViewSet(request=self.request, kwargs={'entry_pk': self.entry.id})
+
+
+class TestHyperlinkedRelatedField(TestHyperlinkedFieldBase):
+
+    def test_single_hyperlinked_related_field(self):
+        field = HyperlinkedRelatedField(
+            related_link_view_name='entry-blog',
+            related_link_url_kwarg='entry_pk',
+            self_link_view_name='entry-relationships',
+            read_only=True,
+        )
+        field._context = {'request': self.request, 'view': self.view}
+        field.field_name = 'blog'
+
+        self.assertRaises(NotImplementedError, field.to_representation, self.entry)
+        self.assertRaises(SkipField, field.get_attribute, self.entry)
+
+        links_expected = {
+            'self': 'http://testserver/entries/{}/relationships/blog'.format(self.entry.pk),
+            'related': 'http://testserver/entries/{}/blog'.format(self.entry.pk)
+        }
+        got = field.get_links(self.entry)
+        self.assertEqual(got, links_expected)
+
+    def test_many_hyperlinked_related_field(self):
+        field = HyperlinkedRelatedField(
+            related_link_view_name='entry-comments',
+            related_link_url_kwarg='entry_pk',
+            self_link_view_name='entry-relationships',
+            read_only=True,
+            many=True
+        )
+        field._context = {'request': self.request, 'view': self.view}
+        field.field_name = 'comments'
+
+        self.assertRaises(NotImplementedError, field.to_representation, self.entry.comments.all())
+        self.assertRaises(SkipField, field.get_attribute, self.entry)
+
+        links_expected = {
+            'self': 'http://testserver/entries/{}/relationships/comments'.format(self.entry.pk),
+            'related': 'http://testserver/entries/{}/comments'.format(self.entry.pk)
+        }
+        got = field.child_relation.get_links(self.entry)
+        self.assertEqual(got, links_expected)
+
+
+class TestSerializerMethodHyperlinkedRelatedField(TestHyperlinkedFieldBase):
+
+    def test_single_serializer_method_hyperlinked_related_field(self):
+        serializer = EntryModelSerializerWithHyperLinks(
+            instance=self.entry,
+            context={
+                'request': self.request,
+                'view': self.view
+            }
+        )
+        field = serializer.fields['blog']
+
+        self.assertRaises(NotImplementedError, field.to_representation, self.entry)
+        self.assertRaises(SkipField, field.get_attribute, self.entry)
+
+        expected = {
+            'self': 'http://testserver/entries/{}/relationships/blog'.format(self.entry.pk),
+            'related': 'http://testserver/entries/{}/blog'.format(self.entry.pk)
+        }
+        got = field.get_links(self.entry)
+        self.assertEqual(got, expected)
+
+    def test_many_serializer_method_hyperlinked_related_field(self):
+        serializer = EntryModelSerializerWithHyperLinks(
+            instance=self.entry,
+            context={
+                'request': self.request,
+                'view': self.view
+            }
+        )
+        field = serializer.fields['comments']
+
+        self.assertRaises(NotImplementedError, field.to_representation, self.entry)
+        self.assertRaises(SkipField, field.get_attribute, self.entry)
+
+        expected = {
+            'self': 'http://testserver/entries/{}/relationships/comments'.format(self.entry.pk),
+            'related': 'http://testserver/entries/{}/comments'.format(self.entry.pk)
+        }
+        got = field.get_links(self.entry)
+        self.assertEqual(got, expected)
+
+    def test_get_blog(self):
+        serializer = EntryModelSerializerWithHyperLinks(instance=self.entry)
+        got = serializer.get_blog(self.entry)
+        expected = self.entry.blog
+
+        self.assertEqual(got, expected)
+
+    def test_get_comments(self):
+        serializer = EntryModelSerializerWithHyperLinks(instance=self.entry)
+        got = serializer.get_comments(self.entry)
+        expected = self.entry.comments.all()
+
+        self.assertListEqual(list(got), list(expected))
+
+
+class BlogResourceRelatedField(ResourceRelatedField):
+    def get_queryset(self):
+        return Blog.objects
+
+
 class BlogFKSerializer(serializers.Serializer):
-    blog = ResourceRelatedField(queryset=Blog.objects)
+    blog = BlogResourceRelatedField()
 
 
 class EntryFKSerializer(serializers.Serializer):
@@ -136,8 +277,37 @@ class EntryFKSerializer(serializers.Serializer):
 
 class EntryModelSerializer(serializers.ModelSerializer):
     authors = ResourceRelatedField(many=True, queryset=Author.objects)
-    comment_set = ResourceRelatedField(many=True, read_only=True)
+    comments = ResourceRelatedField(many=True, read_only=True)
 
     class Meta:
         model = Entry
-        fields = ('authors', 'comment_set')
+        fields = ('authors', 'comments')
+
+
+class EntryModelSerializerWithHyperLinks(serializers.ModelSerializer):
+    blog = SerializerMethodHyperlinkedRelatedField(
+        related_link_view_name='entry-blog',
+        related_link_url_kwarg='entry_pk',
+        self_link_view_name='entry-relationships',
+        many=True,
+        read_only=True,
+        source='get_blog'
+    )
+    comments = SerializerMethodHyperlinkedRelatedField(
+        related_link_view_name='entry-comments',
+        related_link_url_kwarg='entry_pk',
+        self_link_view_name='entry-relationships',
+        many=True,
+        read_only=True,
+        source='get_comments'
+    )
+
+    class Meta:
+        model = Entry
+        fields = ('blog', 'comments',)
+
+    def get_blog(self, obj):
+        return obj.blog
+
+    def get_comments(self, obj):
+        return obj.comments.all()

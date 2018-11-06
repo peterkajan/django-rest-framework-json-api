@@ -51,15 +51,15 @@ like the following:
 
 ## Requirements
 
-1. Python >= 2.7
-2. Django
-3. Django REST Framework >= 3.1
+1. Python (2.7, 3.4, 3.5, 3.6)
+2. Django (1.11, 2.0)
+3. Django REST Framework (3.6, 3.7, 3.8)
 
 ## Installation
 
 From PyPI
 
-    pip install djangorestframework-jsonapi==2.0.0-beta.1
+    pip install djangorestframework-jsonapi
 
 From Source
 
@@ -68,13 +68,21 @@ From Source
 
 ## Running the example app
 
-    git clone https://github.com/django-json-api/django-rest-framework-json-api.git
-    cd django-rest-framework-json-api && pip install -e .
-    django-admin.py runserver
+	git clone https://github.com/django-json-api/django-rest-framework-json-api.git
+	cd django-rest-framework-json-api
+	python3 -m venv env
+	source env/bin/activate
+	pip install -r example/requirements.txt
+	pip install -e .
+	django-admin migrate --settings=example.settings
+	django-admin loaddata drf_example --settings=example.settings
+	django-admin runserver --settings=example.settings
+
 
 Browse to http://localhost:8000
 
 ## Running Tests
 
-    python runtests.py
+    pip install tox
+    tox
 

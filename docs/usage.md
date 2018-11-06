@@ -1,10 +1,11 @@
 
 # Usage
 
-The DJA package implements a custom renderer, parser, exception handler, and
+The DJA package implements a custom renderer, parser, exception handler, query filter backends, and
 pagination. To get started enable the pieces in `settings.py` that you want to use.
 
-Many features of the JSON:API format standard have been implemented using Mixin classes in `serializers.py`.
+Many features of the [JSON:API](http://jsonapi.org/format) format standard have been implemented using 
+Mixin classes in `serializers.py`.
 The easiest way to make use of those features is to import ModelSerializer variants
 from `rest_framework_json_api` instead of the usual `rest_framework`
 
@@ -15,7 +16,7 @@ REST_FRAMEWORK = {
     'PAGE_SIZE': 10,
     'EXCEPTION_HANDLER': 'rest_framework_json_api.exceptions.exception_handler',
     'DEFAULT_PAGINATION_CLASS':
-        'rest_framework_json_api.pagination.PageNumberPagination',
+        'rest_framework_json_api.pagination.JsonApiPageNumberPagination',
     'DEFAULT_PARSER_CLASSES': (
         'rest_framework_json_api.parsers.JSONParser',
         'rest_framework.parsers.FormParser',
@@ -23,16 +24,225 @@ REST_FRAMEWORK = {
     ),
     'DEFAULT_RENDERER_CLASSES': (
         'rest_framework_json_api.renderers.JSONRenderer',
-        'rest_framework.renderers.BrowsableAPIRenderer',
+        # If you're performance testing, you will want to use the browseable API
+        # without forms, as the forms can generate their own queries.
+        # If performance testing, enable:
+        # 'example.utils.BrowsableAPIRendererWithoutForms',
+        # Otherwise, to play around with the browseable API, enable:
+        'rest_framework.renderers.BrowsableAPIRenderer'
     ),
     'DEFAULT_METADATA_CLASS': 'rest_framework_json_api.metadata.JSONAPIMetadata',
+    'DEFAULT_FILTER_BACKENDS': (
+        'rest_framework_json_api.filters.QueryParameterValidationFilter',
+        'rest_framework_json_api.filters.OrderingFilter',
+        'rest_framework_json_api.django_filters.DjangoFilterBackend',
+        'rest_framework.filters.SearchFilter',
+    ),
+    'SEARCH_PARAM': 'filter[search]',
+    'TEST_REQUEST_RENDERER_CLASSES': (
+        'rest_framework_json_api.renderers.JSONRenderer',
+    ),
+    'TEST_REQUEST_DEFAULT_FORMAT': 'vnd.api+json'
 }
 ```
 
-If `PAGE_SIZE` is set the renderer will return a `meta` object with
+### Pagination
+
+DJA pagination is based on [DRF pagination](https://www.django-rest-framework.org/api-guide/pagination/).
+
+When pagination is enabled, the renderer will return a `meta` object with
 record count and a `links` object with the next, previous, first, and last links.
-Pages can be selected with the `page` GET parameter. Page size can be controlled
-per request via the `PAGINATE_BY_PARAM` query parameter (`page_size` by default).
+
+Optional query parameters can also be provided to customize the page size or offset limit.
+
+#### Configuring the Pagination Style
+
+Pagination style can be set on a particular viewset with the `pagination_class` attribute or by default for all viewsets
+by setting `REST_FRAMEWORK['DEFAULT_PAGINATION_CLASS']` and by setting `REST_FRAMEWORK['PAGE_SIZE']`.
+
+You can configure fixed values for the page size or limit -- or allow the client to choose the size or limit
+via query parameters.
+
+Two pagination classes are available:
+- `JsonApiPageNumberPagination` breaks a response up into pages that start at a given page number with a given size 
+  (number of items per page). It can be configured with the following attributes:
+  - `page_query_param` (default `page[number]`)
+  - `page_size_query_param` (default `page[size]`) Set this to `None` if you don't want to allow the client 
+     to specify the size.
+  - `page_size` (default `REST_FRAMEWORK['PAGE_SIZE']`) default number of items per page unless overridden by
+     `page_size_query_param`.
+  - `max_page_size` (default `100`) enforces an upper bound on the `page_size_query_param`.
+     Set it to `None` if you don't want to enforce an upper bound.
+
+- `JsonApiLimitOffsetPagination` breaks a response up into pages that start from an item's offset in the viewset for 
+  a given number of items (the limit).
+  It can be configured with the following attributes:
+  - `offset_query_param` (default `page[offset]`).
+  - `limit_query_param` (default `page[limit]`).
+  - `default_limit` (default `REST_FRAMEWORK['PAGE_SIZE']`) is the default number of items per page unless
+     overridden by `limit_query_param`.
+  - `max_limit` (default `100`) enforces an upper bound on the limit.
+     Set it to `None` if you don't want to enforce an upper bound.
+
+##### Examples
+These examples show how to configure the parameters to use non-standard names and different limits:
+
+```python
+from rest_framework_json_api.pagination import JsonApiPageNumberPagination, JsonApiLimitOffsetPagination
+
+class MyPagePagination(JsonApiPageNumberPagination):
+    page_query_param = 'page_number'
+    page_size_query_param = 'page_length'
+    page_size = 3
+    max_page_size = 1000
+
+class MyLimitPagination(JsonApiLimitOffsetPagination):
+    offset_query_param = 'offset'
+    limit_query_param = 'limit'
+    default_limit = 3
+    max_limit = None
+```
+
+### Filter Backends
+
+Following are descriptions of JSON:API-specific filter backends and documentation on suggested usage
+for a standard DRF keyword-search filter backend that makes it consistent with JSON:API.
+
+#### `QueryParameterValidationFilter`
+`QueryParameterValidationFilter` validates query parameters to be one of the defined JSON:API query parameters
+(sort, include, filter, fields, page) and returns a `400 Bad Request` if a non-matching query parameter
+is used. This can help the client identify misspelled query parameters, for example.
+
+If you want to change the list of valid query parameters, override the `.query_regex` attribute:
+```python
+# compiled regex that matches the allowed http://jsonapi.org/format/#query-parameters
+# `sort` and `include` stand alone; `filter`, `fields`, and `page` have []'s
+query_regex = re.compile(r'^(sort|include)$|^(filter|fields|page)(\[[\w\.\-]+\])?$')
+```
+For example:
+```python
+import re
+from rest_framework_json_api.filters import QueryValidationFilter
+
+class MyQPValidator(QueryValidationFilter):
+    query_regex = re.compile(r'^(sort|include|page|page_size)$|^(filter|fields|page)(\[[\w\.\-]+\])?$')
+```
+
+If you don't care if non-JSON:API query parameters are allowed (and potentially silently ignored),
+simply don't use this filter backend.
+
+#### `OrderingFilter`
+`OrderingFilter` implements the [JSON:API `sort`](http://jsonapi.org/format/#fetching-sorting) and uses
+DRF's [ordering filter](http://django-rest-framework.readthedocs.io/en/latest/api-guide/filtering/#orderingfilter).
+
+Per the JSON:API specification, "If the server does not support sorting as specified in the query parameter `sort`,
+it **MUST** return `400 Bad Request`." For example, for `?sort=abc,foo,def` where `foo` is a valid
+field name and the other two are not valid:
+```json
+{
+    "errors": [
+        {
+            "detail": "invalid sort parameters: abc,def",
+            "source": {
+                "pointer": "/data"
+            },
+            "status": "400"
+        }
+    ]
+}
+```
+
+If you want to silently ignore bad sort fields, just use `rest_framework.filters.OrderingFilter` and set
+`ordering_param` to `sort`.
+
+#### `DjangoFilterBackend`
+`DjangoFilterBackend` implements a Django ORM-style [JSON:API `filter`](http://jsonapi.org/format/#fetching-filtering)
+using the [django-filter](https://django-filter.readthedocs.io/) package.
+
+This filter is not part of the JSON:API standard per-se, other than the requirement
+to use the `filter` keyword: It is an optional implementation of a style of
+filtering in which each filter is an ORM expression as implemented by
+`DjangoFilterBackend` and seems to be in alignment with an interpretation of the
+[JSON:API _recommendations_](http://jsonapi.org/recommendations/#filtering), including relationship
+chaining.
+
+Filters can be:
+- A resource field equality test:
+    `?filter[qty]=123`
+- Apply other [field lookup](https://docs.djangoproject.com/en/stable/ref/models/querysets/#field-lookups) operators:
+    `?filter[name.icontains]=bar` or `?filter[name.isnull]=true`
+- Membership in a list of values:
+    `?filter[name.in]=abc,123,zzz (name in ['abc','123','zzz'])`
+- Filters can be combined for intersection (AND):
+    `?filter[qty]=123&filter[name.in]=abc,123,zzz&filter[...]`
+- A related resource path can be used:
+    `?filter[inventory.item.partNum]=123456` (where `inventory.item` is the relationship path)
+
+If you are also using [`SearchFilter`](#searchfilter)
+(which performs single parameter searches across multiple fields) you'll want to customize the name of the query
+parameter for searching to make sure it doesn't conflict with a field name defined in the filterset.
+The recommended value is: `search_param="filter[search]"` but just make sure it's
+`filter[_something_]` to comply with the JSON:API spec requirement to use the filter
+keyword. The default is `REST_FRAMEWORK['SEARCH_PARAM']` unless overriden.
+
+The filter returns a `400 Bad Request` error for invalid filter query parameters as in this example
+for `GET http://127.0.0.1:8000/nopage-entries?filter[bad]=1`:
+```json
+{
+    "errors": [
+        {
+            "detail": "invalid filter[bad]",
+            "source": {
+                "pointer": "/data"
+            },
+            "status": "400"
+        }
+    ]
+}
+```
+
+#### `SearchFilter`
+
+To comply with JSON:API query parameter naming standards, DRF's
+[SearchFilter](https://django-rest-framework.readthedocs.io/en/latest/api-guide/filtering/#searchfilter) should
+be configured to use a `filter[_something_]` query parameter. This can be done by default by adding the
+SearchFilter to `REST_FRAMEWORK['DEFAULT_FILTER_BACKENDS']` and setting `REST_FRAMEWORK['SEARCH_PARAM']` or
+adding the `.search_param` attribute to a custom class derived from `SearchFilter`.  If you do this and also
+use [`DjangoFilterBackend`](#djangofilterbackend), make sure you set the same values for both classes.
+
+
+
+#### Configuring Filter Backends
+
+You can configure the filter backends either by setting the `REST_FRAMEWORK['DEFAULT_FILTER_BACKENDS']` as shown
+in the [example settings](#configuration) or individually add them as `.filter_backends` View attributes:
+ 
+ ```python
+from rest_framework_json_api import filters
+from rest_framework_json_api import django_filters
+from rest_framework import SearchFilter
+from models import MyModel
+
+class MyViewset(ModelViewSet):
+    queryset = MyModel.objects.all()
+    serializer_class = MyModelSerializer
+    filter_backends = (filters.QueryParameterValidationFilter, filters.OrderingFilter,
+	                   django_filters.DjangoFilterBackend, SearchFilter)
+    filterset_fields = {
+        'id': ('exact', 'lt', 'gt', 'gte', 'lte', 'in'),
+        'descriptuon': ('icontains', 'iexact', 'contains'),
+        'tagline': ('icontains', 'iexact', 'contains'),
+    }
+    search_fields = ('id', 'description', 'tagline',)
+
+```
+
+
+### Performance Testing
+
+If you are trying to see if your viewsets are configured properly to optimize performance,
+it is preferable to use `example.utils.BrowsableAPIRendererWithoutForms` instead of the default `BrowsableAPIRenderer`
+to remove queries introduced by the forms themselves.
 
 ### Serializers
 
@@ -42,7 +252,7 @@ rather than from vanilla DRF. For example,
 ```python
 from rest_framework_json_api import serializers
 
-class MyModelSerializer(serializers.ModelSerializers):
+class MyModelSerializer(serializers.ModelSerializer):
     # ...
 ```
 
@@ -95,13 +305,13 @@ multiple endpoints. Setting the `resource_name` on views may result in a differe
 
 ### Inflecting object and relation keys
 
-This package includes the ability (off by default) to automatically convert json
-requests and responses from the python/rest_framework's preferred underscore to
+This package includes the ability (off by default) to automatically convert [json
+api field names](http://jsonapi.org/format/#document-resource-object-fields) of requests and responses from the python/rest_framework's preferred underscore to
 a format of your choice. To hook this up include the following setting in your
 project settings:
 
 ``` python
-JSON_API_FORMAT_KEYS = 'dasherize'
+JSON_API_FORMAT_FIELD_NAMES = 'dasherize'
 ```
 
 Possible values:
@@ -262,6 +472,8 @@ When set to pluralize:
 
 ### Related fields
 
+#### ResourceRelatedField
+
 Because of the additional structure needed to represent relationships in JSON
 API, this package provides the `ResourceRelatedField` for serializers, which
 works similarly to `PrimaryKeyRelatedField`. By default,
@@ -291,7 +503,7 @@ class OrderSerializer(serializers.ModelSerializer):
 
 ```
 
-In the [JSON API spec](http://jsonapi.org/format/#document-resource-objects),
+In the [JSON:API spec](http://jsonapi.org/format/#document-resource-objects),
 relationship objects contain links to related objects. To make this work
 on a serializer we need to tell the `ResourceRelatedField` about the
 corresponding view. Use the `HyperlinkedModelSerializer` and instantiate
@@ -304,7 +516,7 @@ from rest_framework_json_api.relations import ResourceRelatedField
 from myapp.models import Order, LineItem, Customer
 
 
-class OrderSerializer(serializers.ModelSerializer):
+class OrderSerializer(serializers.HyperlinkedModelSerializer):
     class Meta:
         model = Order
 
@@ -318,7 +530,7 @@ class OrderSerializer(serializers.ModelSerializer):
 
     customer = ResourceRelatedField(
         queryset=Customer.objects,
-        related_link_view-name='order-customer-detail',
+        related_link_view_name='order-customer-detail',
         related_link_url_kwarg='order_pk',
         self_link_view_name='order-relationships'
     )
@@ -337,7 +549,7 @@ can be filtered to show only those objects related to the 'parent'.
 In this example, `reverse('order-lineitems-list', kwargs={'order_pk': 3}`
 should resolve to something like `/orders/3/lineitems`, and that route
 should instantiate a view or viewset for `LineItem` objects that accepts
-a keword argument `order_pk`. The
+a keyword argument `order_pk`. The
 [drf-nested-routers](https://github.com/alanjds/drf-nested-routers) package
 is useful for defining such nested routes in your urlconf.
 
@@ -360,7 +572,7 @@ class LineItemViewSet(viewsets.ModelViewSet):
     serializer_class = LineItemSerializer
 
     def get_queryset(self):
-        queryset = self.queryset
+        queryset = super(LineItemViewSet, self).get_queryset()
 
         # if this viewset is accessed via the 'order-lineitems-list' route,
         # it wll have been passed the `order_pk` kwarg and the queryset
@@ -368,15 +580,68 @@ class LineItemViewSet(viewsets.ModelViewSet):
         # unnested '/lineitems' route, the queryset should include all LineItems
         if 'order_pk' in self.kwargs:
             order_pk = self.kwargs['order_pk']
-            queryset = queryset.filter(order__pk=order_pk])
+            queryset = queryset.filter(order__pk=order_pk)
 
         return queryset
 ```
 
+#### HyperlinkedRelatedField
+
+`HyperlinkedRelatedField` has same functionality as `ResourceRelatedField` but does
+not render `data`. Use this in case you only need links of relationships and want to lower payload
+and increase performance.
+
+#### Related urls
+
+There is a nice way to handle "related" urls like `/orders/3/lineitems/` or `/orders/3/customer/`.
+All you need is just add to `urls.py`:
+```python
+url(r'^orders/(?P<pk>[^/.]+)/$',
+        OrderViewSet.as_view({'get': 'retrieve'}),
+        name='order-detail'),
+url(r'^orders/(?P<pk>[^/.]+)/(?P<related_field>\w+)/$',
+        OrderViewSet.as_view({'get': 'retrieve_related'}),
+        name='order-related'),
+```
+Make sure that RelatedField declaration has `related_link_url_kwarg='pk'` or simply skipped (will be set by default):
+```python
+    line_items = ResourceRelatedField(
+        queryset=LineItem.objects,
+        many=True,
+        related_link_view_name='order-related',
+        related_link_url_kwarg='pk',
+        self_link_view_name='order-relationships'
+    )
+
+    customer = ResourceRelatedField(
+        queryset=Customer.objects,
+        related_link_view_name='order-related',
+        self_link_view_name='order-relationships'
+    )
+```
+And, the most important part - declare serializer for each related entity:
+```python
+class OrderSerializer(serializers.HyperlinkedModelSerializer):
+    ...
+    related_serializers = {
+        'customer': 'example.serializers.CustomerSerializer',
+        'line_items': 'example.serializers.LineItemSerializer'
+    }
+```
+Or, if you already have `included_serializers` declared and your `related_serializers` look the same, just skip it:
+```python
+class OrderSerializer(serializers.HyperlinkedModelSerializer):
+    ...
+    included_serializers = {
+        'customer': 'example.serializers.CustomerSerializer',
+        'line_items': 'example.serializers.LineItemSerializer'
+    }
+```
+
 ### RelationshipView
 `rest_framework_json_api.views.RelationshipView` is used to build
-relationship views (see the 
-[JSON API spec](http://jsonapi.org/format/#fetching-relationships)).
+relationship views (see the
+[JSON:API spec](http://jsonapi.org/format/#fetching-relationships)).
 The `self` link on a relationship object should point to the corresponding
 relationship view.
 
@@ -399,7 +664,7 @@ The urlconf would need to contain a route like the following:
 
 ```python
 url(
-    regex=r'^orders/(?P<pk>[^/.]+/relationships/(?P<related_field>[^/.]+)$',
+    regex=r'^orders/(?P<pk>[^/.]+)/relationships/(?P<related_field>[^/.]+)$',
     view=OrderRelationshipView.as_view(),
     name='order-relationships'
 )
@@ -408,7 +673,7 @@ url(
 The `related_field` kwarg specifies which relationship to use, so
 if we are interested in the relationship represented by the related
 model field `Order.line_items` on the Order with pk 3, the url would be
-`/order/3/relationships/line_items`. On `HyperlinkedModelSerializer`, the
+`/orders/3/relationships/line_items`. On `HyperlinkedModelSerializer`, the
 `ResourceRelatedField` will construct the url based on the provided
 `self_link_view_name` keyword argument, which should match the `name=`
 provided in the urlconf, and will use the name of the field for the
@@ -422,6 +687,59 @@ field_name_mapping = {
     }
 ```
 
+
+### Working with polymorphic resources
+
+Polymorphic resources allow you to use specialized subclasses without requiring
+special endpoints to expose the specialized versions. For example, if you had a
+`Project` that could be either an `ArtProject` or a `ResearchProject`, you can
+have both kinds at the same URL.
+
+DJA tests its polymorphic support against [django-polymorphic](https://django-polymorphic.readthedocs.io/en/stable/).
+The polymorphic feature should also work with other popular libraries like
+django-polymodels or django-typed-models.
+
+#### Writing polymorphic resources
+
+A polymorphic endpoint can be set up if associated with a polymorphic serializer.
+A polymorphic serializer takes care of (de)serializing the correct instances types and can be defined like this:
+
+```python
+class ProjectSerializer(serializers.PolymorphicModelSerializer):
+    polymorphic_serializers = [ArtProjectSerializer, ResearchProjectSerializer]
+
+    class Meta:
+        model = models.Project
+```
+
+It must inherit from `serializers.PolymorphicModelSerializer` and define the `polymorphic_serializers` list.
+This attribute defines the accepted resource types.
+
+
+Polymorphic relations can also be handled with `relations.PolymorphicResourceRelatedField` like this:
+
+```python
+class CompanySerializer(serializers.ModelSerializer):
+    current_project = relations.PolymorphicResourceRelatedField(
+        ProjectSerializer, queryset=models.Project.objects.all())
+    future_projects = relations.PolymorphicResourceRelatedField(
+        ProjectSerializer, queryset=models.Project.objects.all(), many=True)
+
+    class Meta:
+        model = models.Company
+```
+
+They must be explicitly declared with the `polymorphic_serializer` (first positional argument) correctly defined.
+It must be a subclass of `serializers.PolymorphicModelSerializer`.
+
+<div class="warning">
+    <strong>Note:</strong>
+    Polymorphic resources are not compatible with
+    <code class="docutils literal">
+        <span class="pre">resource_name</span>
+    </code>
+    defined on the view.
+</div>
 
 ### Meta
 
@@ -449,14 +767,108 @@ def get_root_meta(self, resource, many):
 ```
 to the serializer. It must return a dict and will be merged with the existing top level `meta`.
 
+To access metadata in incoming requests, the `JSONParser` will add the metadata under a top level `_meta` key in the parsed data dictionary. For instance, to access meta data from a `serializer` object, you may use `serializer.initial_data.get("_meta")`. To customize the `_meta` key, see [here](api.md).
+
 ### Links
 
 Adding `url` to `fields` on a serializer will add a `self` link to the `links` key.
 
 Related links will be created automatically when using the Relationship View.
 
+### Included
+
+JSON API can include additional resources in a single network request.
+The specification refers to this feature as
+[Compound Documents](http://jsonapi.org/format/#document-compound-documents).
+Compound Documents can reduce the number of network requests
+which can lead to a better performing web application.
+To accomplish this,
+the specification permits a top level `included` key.
+The list of content within this key are the extra resources
+that are related to the primary resource.
+
+To make a Compound Document,
+you need to modify your `ModelSerializer`.
+The two required additions are `included_resources`
+and `included_serializers`.
+
+For example,
+suppose you are making an app to go on quests,
+and you would like to fetch your chosen knight
+along with the quest.
+You could accomplish that with:
+
+```python
+class KnightSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Knight
+        fields = ('id', 'name', 'strength', 'dexterity', 'charisma')
+
+
+class QuestSerializer(serializers.ModelSerializer):
+    included_serializers = {
+        'knight': KnightSerializer,
+    }
+
+    class Meta:
+        model = Quest
+        fields = ('id', 'title', 'reward', 'knight')
+
+    class JSONAPIMeta:
+        included_resources = ['knight']
+```
+
+`included_resources` informs DJA of **what** you would like to include.
+`included_serializers` tells DJA **how** you want to include it.
+
+#### Performance improvements
+
+Be aware that using included resources without any form of prefetching **WILL HURT PERFORMANCE** as it will introduce m\*(n+1) queries.
+
+A viewset helper was designed to allow for greater flexibility and it is automatically available when subclassing
+`rest_framework_json_api.views.ModelViewSet`:
+```python
+from rest_framework_json_api import views
+
+# When MyViewSet is called with ?include=author it will dynamically prefetch author and author.bio
+class MyViewSet(views.ModelViewSet):
+    queryset = Book.objects.all()
+    prefetch_for_includes = {
+        '__all__': [],
+        'author': ['author', 'author__bio'],
+        'category.section': ['category']
+    }
+```
+
+An additional convenience DJA class exists for read-only views, just as it does in DRF.
+```python
+from rest_framework_json_api import views
+
+class MyReadOnlyViewSet(views.ReadOnlyModelViewSet):
+    # ...
+```
+
+The special keyword `__all__` can be used to specify a prefetch which should be done regardless of the include, similar to making the prefetch yourself on the QuerySet.
+
+Using the helper to prefetch, rather than attempting to minimise queries via select_related might give you better performance depending on the characteristics of your data and database.
+
+For example:
+
+If you have a single model, e.g. Book, which has four relations e.g. Author, Publisher, CopyrightHolder, Category.
+
+To display 25 books and related models, you would need to either do:
+
+a) 1 query via selected_related, e.g. SELECT * FROM books LEFT JOIN author LEFT JOIN publisher LEFT JOIN CopyrightHolder LEFT JOIN Category
+
+b) 4 small queries via prefetch_related.
+
+If you have 1M books, 50k authors, 10k categories, 10k copyrightholders
+in the select_related scenario, you've just created a in-memory table
+with 1e18 rows which will likely exhaust any available memory and
+slow your database to crawl.
+
+The prefetch_related case will issue 4 queries, but they will be small and fast queries.
 <!--
 ### Relationships
-### Included
 ### Errors
 -->

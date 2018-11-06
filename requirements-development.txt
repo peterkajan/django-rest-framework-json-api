@@ -1,7 +1,17 @@
 -e .
-pytest==2.9
+django-debug-toolbar
+django-polymorphic>=2.0
+factory-boy
+Faker
+isort
+mock
+packaging==16.8
+pytest
 pytest-django
 pytest-factoryboy
-fake-factory==0.7.4
+recommonmark
+Sphinx
+sphinx_rtd_theme
 tox
-mock
+twine
+django-filter>=2.0

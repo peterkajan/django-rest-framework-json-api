@@ -1,25 +1,13 @@
-import json
-
-from django.core.urlresolvers import reverse
-from django.conf import settings
+from django.test import override_settings
+from django.urls import reverse
 
 from example.tests import TestBase
-from example.tests.utils import dump_json, redump_json
 
-
+@override_settings(JSON_API_FORMAT_FIELD_NAMES='dasherize')
 class GenericViewSet(TestBase):
     """
     Test expected responses coming from a Generic ViewSet
     """
-
-    def setUp(self):
-        super(GenericViewSet, self).setUp()
-
-        setattr(settings, 'JSON_API_FORMAT_KEYS', 'dasherize')
-
-    def tearDown(self):
-
-        setattr(settings, 'JSON_API_FORMAT_KEYS', 'camelize')
 
     def test_default_rest_framework_behavior(self):
         """
@@ -38,11 +26,7 @@ class GenericViewSet(TestBase):
             'email': 'miles@example.com'
         }
 
-        content_dump = redump_json(response.content)
-        expected_dump = dump_json(expected)
-
-        assert expected_dump == content_dump
-
+        assert expected == response.json()
 
     def test_ember_expected_renderer(self):
         """
@@ -66,10 +50,7 @@ class GenericViewSet(TestBase):
             }
         }
 
-        content_dump = redump_json(response.content)
-        expected_dump = dump_json(expected)
-
-        assert expected_dump == content_dump
+        assert expected == response.json()
 
     def test_default_validation_exceptions(self):
         """
@@ -94,12 +75,45 @@ class GenericViewSet(TestBase):
             ]
         }
         response = self.client.post('/identities', {
-            'email': 'bar', 'first_name': 'alajflajaljalajlfjafljalj'})
+            'data': {
+                'type': 'users',
+                'attributes': {
+                    'email': 'bar', 'first_name': 'alajflajaljalajlfjafljalj'
+                }
+            }
+        })
 
-        content_dump = redump_json(response.content)
-        expected_dump = dump_json(expected)
+        assert expected == response.json()
 
-        assert expected_dump == content_dump
+    def test_custom_validation_exceptions(self):
+        """
+        Exceptions should be able to be formatted manually
+        """
+        expected = {
+            'errors': [
+                {
+                    'id': 'armageddon101',
+                    'detail': 'Hey! You need a last name!',
+                    'meta': 'something',
+                },
+                {
+                    'status': '400',
+                    'source': {
+                        'pointer': '/data/attributes/email',
+                    },
+                    'detail': 'Enter a valid email address.',
+                },
+            ]
+        }
+        response = self.client.post('/identities', {
+            'data': {
+                'type': 'users',
+                'attributes': {
+                    'email': 'bar', 'last_name': 'alajflajaljalajlfjafljalj'
+                }
+            }
+        })
+        assert expected == response.json()
 
     def test_validation_exceptions_with_included(self):
         """
@@ -112,7 +126,7 @@ class GenericViewSet(TestBase):
             },
             'detail': 'This field is required.',
         }
-        response = self.client.post('/entries', dump_json({
+        response = self.client.post('/entries', {
             'data': {
                 'type': 'posts',
                 'id': 1,
@@ -153,6 +167,7 @@ class GenericViewSet(TestBase):
                     },
                 },
             ]
-        }), content_type='application/vnd.api+json')
+        })
 
-        assert expected_error in json.loads(response.content)['errors']
+        assert expected_error in response.json()['errors']
+

@@ -1,18 +1,189 @@
-import django
+from collections import Iterable
+
 from django.core.exceptions import ImproperlyConfigured
-from django.core.urlresolvers import NoReverseMatch
 from django.db.models import Model
-from django.db.models.query import QuerySet
+from django.db.models.fields.related_descriptors import (
+    ForwardManyToOneDescriptor,
+    ManyToManyDescriptor,
+    ReverseManyToOneDescriptor,
+    ReverseOneToOneDescriptor
+)
 from django.db.models.manager import Manager
-from rest_framework import generics
+from django.db.models.query import QuerySet
+from django.urls import NoReverseMatch
+from django.utils.module_loading import import_string as import_class_from_dotted_path
+from rest_framework import generics, viewsets
+from rest_framework.exceptions import MethodNotAllowed, NotFound
 from rest_framework.response import Response
-from rest_framework.exceptions import NotFound, MethodNotAllowed
 from rest_framework.reverse import reverse
 from rest_framework.serializers import Serializer
 
 from rest_framework_json_api.exceptions import Conflict
 from rest_framework_json_api.serializers import ResourceIdentifierObjectSerializer
-from rest_framework_json_api.utils import get_resource_type_from_instance, OrderedDict, Hyperlink
+from rest_framework_json_api.utils import (
+    Hyperlink,
+    OrderedDict,
+    get_included_resources,
+    get_resource_type_from_instance
+)
+
+
+class PrefetchForIncludesHelperMixin(object):
+    def get_queryset(self):
+        """
+        This viewset provides a helper attribute to prefetch related models
+        based on the include specified in the URL.
+
+        __all__ can be used to specify a prefetch which should be done regardless of the include
+
+        .. code:: python
+
+            # When MyViewSet is called with ?include=author it will prefetch author and authorbio
+            class MyViewSet(viewsets.ModelViewSet):
+                queryset = Book.objects.all()
+                prefetch_for_includes = {
+                    '__all__': [],
+                    'author': ['author', 'author__authorbio'],
+                    'category.section': ['category']
+                }
+        """
+        qs = super(PrefetchForIncludesHelperMixin, self).get_queryset()
+        if not hasattr(self, 'prefetch_for_includes'):
+            return qs
+
+        includes = self.request.GET.get('include', '').split(',')
+        for inc in includes + ['__all__']:
+            prefetches = self.prefetch_for_includes.get(inc)
+            if prefetches:
+                qs = qs.prefetch_related(*prefetches)
+
+        return qs
+
+
+class AutoPrefetchMixin(object):
+    def get_queryset(self, *args, **kwargs):
+        """ This mixin adds automatic prefetching for OneToOne and ManyToMany fields. """
+        qs = super(AutoPrefetchMixin, self).get_queryset(*args, **kwargs)
+        included_resources = get_included_resources(self.request)
+
+        for included in included_resources:
+            included_model = None
+            levels = included.split('.')
+            level_model = qs.model
+            for level in levels:
+                if not hasattr(level_model, level):
+                    break
+                field = getattr(level_model, level)
+                field_class = field.__class__
+
+                is_forward_relation = (
+                    issubclass(field_class, ForwardManyToOneDescriptor) or
+                    issubclass(field_class, ManyToManyDescriptor)
+                )
+                is_reverse_relation = (
+                    issubclass(field_class, ReverseManyToOneDescriptor) or
+                    issubclass(field_class, ReverseOneToOneDescriptor)
+                )
+                if not (is_forward_relation or is_reverse_relation):
+                    break
+
+                if level == levels[-1]:
+                    included_model = field
+                else:
+                    model_field = field.field
+
+                    if is_forward_relation:
+                        level_model = model_field.related_model
+                    else:
+                        level_model = model_field.model
+
+            if included_model is not None:
+                qs = qs.prefetch_related(included.replace('.', '__'))
+
+        return qs
+
+
+class RelatedMixin(object):
+    """
+    This mixin handles all related entities, whose Serializers are declared in "related_serializers"
+    """
+
+    def retrieve_related(self, request, *args, **kwargs):
+        serializer_kwargs = {}
+        instance = self.get_related_instance()
+
+        if hasattr(instance, 'all'):
+            instance = instance.all()
+
+        if callable(instance):
+            instance = instance()
+
+        if instance is None:
+            return Response(data=None)
+
+        if isinstance(instance, Iterable):
+            serializer_kwargs['many'] = True
+
+        serializer = self.get_serializer(instance, **serializer_kwargs)
+        return Response(serializer.data)
+
+    def get_serializer_class(self):
+        parent_serializer_class = super(RelatedMixin, self).get_serializer_class()
+
+        if 'related_field' in self.kwargs:
+            field_name = self.kwargs['related_field']
+
+            # Try get the class from related_serializers
+            if hasattr(parent_serializer_class, 'related_serializers'):
+                _class = parent_serializer_class.related_serializers.get(field_name, None)
+                if _class is None:
+                    raise NotFound
+
+            elif hasattr(parent_serializer_class, 'included_serializers'):
+                _class = parent_serializer_class.included_serializers.get(field_name, None)
+                if _class is None:
+                    raise NotFound
+
+            else:
+                assert False, \
+                    'Either "included_serializers" or "related_serializers" should be configured'
+
+            if not isinstance(_class, type):
+                return import_class_from_dotted_path(_class)
+            return _class
+
+        return parent_serializer_class
+
+    def get_related_field_name(self):
+        return self.kwargs['related_field']
+
+    def get_related_instance(self):
+        parent_obj = self.get_object()
+        parent_serializer = self.serializer_class(parent_obj)
+        field_name = self.get_related_field_name()
+        field = parent_serializer.fields.get(field_name, None)
+
+        if field is not None:
+            return field.get_attribute(parent_obj)
+        else:
+            try:
+                return getattr(parent_obj, field_name)
+            except AttributeError:
+                raise NotFound
+
+
+class ModelViewSet(AutoPrefetchMixin,
+                   PrefetchForIncludesHelperMixin,
+                   RelatedMixin,
+                   viewsets.ModelViewSet):
+    pass
+
+
+class ReadOnlyModelViewSet(AutoPrefetchMixin,
+                           PrefetchForIncludesHelperMixin,
+                           RelatedMixin,
+                           viewsets.ReadOnlyModelViewSet):
+    pass
 
 
 class RelationshipView(generics.GenericAPIView):
@@ -66,7 +237,9 @@ class RelationshipView(generics.GenericAPIView):
         return_data = OrderedDict()
         self_link = self.get_url('self', self.self_link_view_name, self.kwargs, self.request)
         related_kwargs = {self.lookup_field: self.kwargs.get(self.lookup_field)}
-        related_link = self.get_url('related', self.related_link_view_name, related_kwargs, self.request)
+        related_link = self.get_url(
+            'related', self.related_link_view_name, related_kwargs, self.request
+        )
         if self_link:
             return_data.update({'self': self_link})
         if related_link:
@@ -84,13 +257,15 @@ class RelationshipView(generics.GenericAPIView):
 
         if isinstance(related_instance_or_manager, Manager):
             related_model_class = related_instance_or_manager.model
-            serializer = self.get_serializer(data=request.data, model_class=related_model_class, many=True)
+            serializer = self.get_serializer(
+                data=request.data, model_class=related_model_class, many=True
+            )
             serializer.is_valid(raise_exception=True)
             related_instance_or_manager.all().delete()
             # have to set bulk to False since data isn't saved yet
-            if django.VERSION >= (1, 9):
-                related_instance_or_manager.add(*serializer.validated_data,
-                                                bulk=False)
+            class_name = related_instance_or_manager.__class__.__name__
+            if class_name != 'ManyRelatedManager':
+                related_instance_or_manager.add(*serializer.validated_data, bulk=False)
             else:
                 related_instance_or_manager.add(*serializer.validated_data)
         else:
@@ -108,7 +283,9 @@ class RelationshipView(generics.GenericAPIView):
 
         if isinstance(related_instance_or_manager, Manager):
             related_model_class = related_instance_or_manager.model
-            serializer = self.get_serializer(data=request.data, model_class=related_model_class, many=True)
+            serializer = self.get_serializer(
+                data=request.data, model_class=related_model_class, many=True
+            )
             serializer.is_valid(raise_exception=True)
             if frozenset(serializer.validated_data) <= frozenset(related_instance_or_manager.all()):
                 return Response(status=204)
@@ -123,15 +300,19 @@ class RelationshipView(generics.GenericAPIView):
 
         if isinstance(related_instance_or_manager, Manager):
             related_model_class = related_instance_or_manager.model
-            serializer = self.get_serializer(data=request.data, model_class=related_model_class, many=True)
+            serializer = self.get_serializer(
+                data=request.data, model_class=related_model_class, many=True
+            )
             serializer.is_valid(raise_exception=True)
-            if frozenset(serializer.validated_data).isdisjoint(frozenset(related_instance_or_manager.all())):
+            objects = related_instance_or_manager.all()
+            if frozenset(serializer.validated_data).isdisjoint(frozenset(objects)):
                 return Response(status=204)
             try:
                 related_instance_or_manager.remove(*serializer.validated_data)
             except AttributeError:
                 raise Conflict(
-                    'This object cannot be removed from this relationship without being added to another'
+                    'This object cannot be removed from this relationship without being '
+                    'added to another'
                 )
         else:
             raise MethodNotAllowed('DELETE')

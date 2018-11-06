@@ -1,10 +1,11 @@
 from django.contrib.auth import models as auth_models
 from django.utils import encoding
-
-from rest_framework import viewsets, generics, renderers, parsers, serializers
-from rest_framework.decorators import list_route, detail_route
+from rest_framework import generics, parsers, renderers, serializers, viewsets
+from rest_framework.decorators import detail_route, list_route
 from rest_framework.response import Response
+
 from rest_framework_json_api import mixins, utils
+
 from ..serializers.identity import IdentitySerializer
 from ..serializers.post import PostSerializer
 
@@ -36,7 +37,7 @@ class Identity(mixins.MultipleIDMixin, viewsets.ModelViewSet):
             encoding.force_text('identities'): IdentitySerializer(identities, many=True).data,
             encoding.force_text('posts'): PostSerializer(posts, many=True).data,
         }
-        return Response(utils.format_keys(data, format_type='camelize'))
+        return Response(utils.format_field_names(data, format_type='camelize'))
 
     @detail_route()
     def manual_resource_name(self, request, *args, **kwargs):
@@ -58,7 +59,6 @@ class GenericIdentity(generics.GenericAPIView):
     allowed_methods = ['GET']
     renderer_classes = (renderers.JSONRenderer, )
     parser_classes = (parsers.JSONParser, )
-
 
     def get_queryset(self):
         return auth_models.User.objects.all()

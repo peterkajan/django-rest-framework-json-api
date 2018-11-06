@@ -1,40 +1,48 @@
-"""
-Utils.
-"""
 import copy
+import inspect
+import operator
 import warnings
 from collections import OrderedDict
-import inspect
 
 import inflection
 from django.conf import settings
-from django.utils import encoding
-from django.utils import six
+from django.db.models import Manager
+from django.db.models.fields.related_descriptors import (
+    ManyToManyDescriptor,
+    ReverseManyToOneDescriptor
+)
+from django.utils import encoding, six
 from django.utils.module_loading import import_string as import_class_from_dotted_path
 from django.utils.translation import ugettext_lazy as _
-from rest_framework.exceptions import APIException
 from rest_framework import exceptions
+from rest_framework.exceptions import APIException
+from rest_framework.serializers import ManyRelatedField  # noqa: F401
 
-try:
-    from rest_framework.serializers import ManyRelatedField
-except ImportError:
-    ManyRelatedField = type(None)
+from .settings import json_api_settings
 
 try:
     from rest_framework_nested.relations import HyperlinkedRouterField
 except ImportError:
-    HyperlinkedRouterField = type(None)
+    HyperlinkedRouterField = object()
+
+# Generic relation descriptor from django.contrib.contenttypes.
+if 'django.contrib.contenttypes' not in settings.INSTALLED_APPS:  # pragma: no cover
+    # Target application does not use contenttypes. Importing would cause errors.
+    ReverseGenericManyToOneDescriptor = object()
+else:
+    from django.contrib.contenttypes.fields import ReverseGenericManyToOneDescriptor
 
 
-def get_resource_name(context):
+def get_resource_name(context, expand_polymorphic_types=False):
     """
     Return the name of a resource.
     """
+    from rest_framework_json_api.serializers import PolymorphicModelSerializer
     view = context.get('view')
 
     # Sanity check to make sure we have a view.
     if not view:
-        raise APIException(_('Could not find view.'))
+        return None
 
     # Check to see if there is a status code and return early
     # with the resource_name value of `errors`.
@@ -51,7 +59,10 @@ def get_resource_name(context):
     except AttributeError:
         try:
             serializer = view.get_serializer_class()
-            return get_resource_type_from_serializer(serializer)
+            if expand_polymorphic_types and issubclass(serializer, PolymorphicModelSerializer):
+                return serializer.get_polymorphic_types()
+            else:
+                return get_resource_type_from_serializer(serializer)
         except AttributeError:
             try:
                 resource_name = get_resource_type_from_model(view.model)
@@ -86,15 +97,60 @@ def get_serializer_fields(serializer):
                 pass
         return fields
 
+
+def format_field_names(obj, format_type=None):
+    """
+    Takes a dict and returns it with formatted keys as set in `format_type`
+    or `JSON_API_FORMAT_FIELD_NAMES`
+
+    :format_type: Either 'dasherize', 'camelize', 'capitalize' or 'underscore'
+    """
+    if format_type is None:
+        format_type = json_api_settings.FORMAT_FIELD_NAMES
+
+    if isinstance(obj, dict):
+        formatted = OrderedDict()
+        for key, value in obj.items():
+            key = format_value(key, format_type)
+            formatted[key] = value
+        return formatted
+
+    return obj
+
+
+def _format_object(obj, format_type=None):
+    """Depending on settings calls either `format_keys` or `format_field_names`"""
+
+    if json_api_settings.FORMAT_KEYS is not None:
+        return format_keys(obj, format_type)
+
+    return format_field_names(obj, format_type)
+
+
 def format_keys(obj, format_type=None):
     """
+    .. warning::
+
+        `format_keys` function and `JSON_API_FORMAT_KEYS` setting are deprecated and will be
+        removed in the future.
+        Use `format_field_names` and `JSON_API_FIELD_NAMES` instead. Be aware that
+        `format_field_names` only formats keys and preserves value.
+
     Takes either a dict or list and returns it with camelized keys only if
     JSON_API_FORMAT_KEYS is set.
 
-    :format_type: Either 'dasherize', 'camelize' or 'underscore'
+    :format_type: Either 'dasherize', 'camelize', 'capitalize' or 'underscore'
     """
+    warnings.warn(
+        "`format_keys` function and `JSON_API_FORMAT_KEYS` setting are deprecated and will be "
+        "removed in the future. "
+        "Use `format_field_names` and `JSON_API_FIELD_NAMES` instead. Be aware that "
+        "`format_field_names` only formats keys and preserves value.",
+        DeprecationWarning
+    )
+
     if format_type is None:
-        format_type = getattr(settings, 'JSON_API_FORMAT_KEYS', False)
+        format_type = json_api_settings.FORMAT_KEYS
 
     if format_type in ('dasherize', 'camelize', 'underscore', 'capitalize'):
 
@@ -126,7 +182,7 @@ def format_keys(obj, format_type=None):
 
 def format_value(value, format_type=None):
     if format_type is None:
-        format_type = getattr(settings, 'JSON_API_FORMAT_KEYS', False)
+        format_type = json_api_settings.format_type
     if format_type == 'dasherize':
         # inflection can't dasherize camelCase
         value = inflection.underscore(value)
@@ -141,18 +197,31 @@ def format_value(value, format_type=None):
 
 
 def format_relation_name(value, format_type=None):
-    warnings.warn("The 'format_relation_name' function has been renamed 'format_resource_type' and the settings are now 'JSON_API_FORMAT_TYPES' and 'JSON_API_PLURALIZE_TYPES'")
+    """
+    .. warning::
+
+        The 'format_relation_name' function has been renamed 'format_resource_type' and the
+        settings are now 'JSON_API_FORMAT_TYPES' and 'JSON_API_PLURALIZE_TYPES' instead of
+        'JSON_API_FORMAT_RELATION_KEYS' and 'JSON_API_PLURALIZE_RELATION_TYPE'
+    """
+    warnings.warn(
+        "The 'format_relation_name' function has been renamed 'format_resource_type' and the "
+        "settings are now 'JSON_API_FORMAT_TYPES' and 'JSON_API_PLURALIZE_TYPES' instead of "
+        "'JSON_API_FORMAT_RELATION_KEYS' and 'JSON_API_PLURALIZE_RELATION_TYPE'",
+        DeprecationWarning
+    )
     if format_type is None:
-        format_type = getattr(settings, 'JSON_API_FORMAT_RELATION_KEYS', None)
-    pluralize = getattr(settings, 'JSON_API_PLURALIZE_RELATION_TYPE', None)
+        format_type = json_api_settings.FORMAT_RELATION_KEYS
+    pluralize = json_api_settings.PLURALIZE_RELATION_TYPE
     return format_resource_type(value, format_type, pluralize)
+
 
 def format_resource_type(value, format_type=None, pluralize=None):
     if format_type is None:
-        format_type = getattr(settings, 'JSON_API_FORMAT_TYPES', False)
+        format_type = json_api_settings.FORMAT_TYPES
 
     if pluralize is None:
-        pluralize = getattr(settings, 'JSON_API_PLURALIZE_TYPES', False)
+        pluralize = json_api_settings.PLURALIZE_TYPES
 
     if format_type:
         # format_type will never be None here so we can use format_value
@@ -166,7 +235,6 @@ def get_related_resource_type(relation):
         return get_resource_type_from_serializer(relation)
     except AttributeError:
         pass
-
     relation_model = None
     if hasattr(relation, '_meta'):
         relation_model = relation._meta.model
@@ -175,6 +243,13 @@ def get_related_resource_type(relation):
         relation_model = relation.model
     elif hasattr(relation, 'get_queryset') and relation.get_queryset() is not None:
         relation_model = relation.get_queryset().model
+    elif (
+            getattr(relation, 'many', False) and
+            hasattr(relation.child, 'Meta') and
+            hasattr(relation.child.Meta, 'model')):
+        # For ManyToMany relationships, get the model from the child
+        # serializer of the list serializer
+        relation_model = relation.child.Meta.model
     else:
         parent_serializer = relation.parent
         parent_model = None
@@ -183,7 +258,7 @@ def get_related_resource_type(relation):
         elif hasattr(parent_serializer, 'parent') and hasattr(parent_serializer.parent, 'Meta'):
             parent_model = getattr(parent_serializer.parent.Meta, 'model', None)
 
-        if parent_model is not  None:
+        if parent_model is not None:
             if relation.source:
                 if relation.source != '*':
                     parent_model_relation = getattr(parent_model, relation.source)
@@ -192,17 +267,21 @@ def get_related_resource_type(relation):
             else:
                 parent_model_relation = getattr(parent_model, parent_serializer.field_name)
 
-            if hasattr(parent_model_relation, 'related'):
-                try:
-                    relation_model = parent_model_relation.related.related_model
-                except AttributeError:
-                    # Django 1.7
-                    relation_model = parent_model_relation.related.model
+            parent_model_relation_type = type(parent_model_relation)
+            if parent_model_relation_type is ReverseManyToOneDescriptor:
+                relation_model = parent_model_relation.rel.related_model
+            elif parent_model_relation_type is ManyToManyDescriptor:
+                relation_model = parent_model_relation.field.remote_field.model
+                # In case we are in a reverse relation
+                if relation_model == parent_model:
+                    relation_model = parent_model_relation.field.model
+            elif parent_model_relation_type is ReverseGenericManyToOneDescriptor:
+                relation_model = parent_model_relation.rel.model
             elif hasattr(parent_model_relation, 'field'):
                 try:
-                   relation_model = parent_model_relation.field.remote_field.model
+                    relation_model = parent_model_relation.field.remote_field.model
                 except AttributeError:
-                   relation_model = parent_model_relation.field.related.model
+                    relation_model = parent_model_relation.field.related.model
             else:
                 return get_related_resource_type(parent_model_relation)
 
@@ -245,11 +324,20 @@ def get_resource_type_from_serializer(serializer):
     raise AttributeError()
 
 
+def get_included_resources(request, serializer=None):
+    """ Build a list of included resources. """
+    include_resources_param = request.query_params.get('include') if request else None
+    if include_resources_param:
+        return include_resources_param.split(',')
+    else:
+        return get_default_included_resources_from_serializer(serializer)
+
+
 def get_default_included_resources_from_serializer(serializer):
-    try:
-        return list(serializer.JSONAPIMeta.included_resources)
-    except AttributeError:
-        return []
+    meta = getattr(serializer, 'JSONAPIMeta', None)
+    if meta is None and getattr(serializer, 'many', False):
+        meta = getattr(serializer.child, 'JSONAPIMeta', None)
+    return list(getattr(meta, 'included_resources', []))
 
 
 def get_included_serializers(serializer):
@@ -258,11 +346,31 @@ def get_included_serializers(serializer):
     for name, value in six.iteritems(included_serializers):
         if not isinstance(value, type):
             if value == 'self':
-                included_serializers[name] = serializer if isinstance(serializer, type) else serializer.__class__
+                included_serializers[name] = (
+                    serializer if isinstance(serializer, type) else serializer.__class__
+                )
             else:
                 included_serializers[name] = import_class_from_dotted_path(value)
 
     return included_serializers
+
+
+def get_relation_instance(resource_instance, source, serializer):
+    try:
+        relation_instance = operator.attrgetter(source)(resource_instance)
+    except AttributeError:
+        # if the field is not defined on the model then we check the serializer
+        # and if no value is there we skip over the field completely
+        serializer_method = getattr(serializer, source, None)
+        if serializer_method and hasattr(serializer_method, '__call__'):
+            relation_instance = serializer_method(resource_instance)
+        else:
+            return False, None
+
+    if isinstance(relation_instance, Manager):
+        relation_instance = relation_instance.all()
+
+    return True, relation_instance
 
 
 class Hyperlink(six.text_type):
@@ -332,9 +440,7 @@ def format_drf_errors(response, context, exc):
                                                                status=encoding.force_text(response.status_code),
                                                                source='/included/%s' % identifier))
                 else:
-                    errors.extend(_format_nested_error(error,
-                                                       status=encoding.force_text(response.status_code),
-                                                       source='/data/%s' % field))
+                    errors.append(error)
             elif isinstance(error, six.string_types):
                 classes = inspect.getmembers(exceptions, inspect.isclass)
                 # DRF sets the `field` to 'detail' for its own exceptions

@@ -20,6 +20,7 @@ var/
 *.egg-info/
 .installed.cfg
 *.egg
+.eggs/
 
 # Installer logs
 pip-log.txt
@@ -29,10 +30,23 @@ pip-delete-this-directory.txt
 .idea/
 
 # PyTest cache
-.cache/
+.pytest_cache/
+
+# Coverage
+.coverage
 
 # Tox
 .tox/
+.cache/
+.python-version
 
 # VirtualEnv
 .venv/
+
+# Developers
+*.sw*
+manage.py
+.DS_Store
+
+# example database
+drf_example

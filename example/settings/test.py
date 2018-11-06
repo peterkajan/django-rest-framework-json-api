@@ -1,4 +1,4 @@
-from .dev import *
+from .dev import *  # noqa
 
 DATABASES = {
     'default': {
@@ -9,9 +9,10 @@ DATABASES = {
 
 ROOT_URLCONF = 'example.urls_test'
 
-JSON_API_FORMAT_KEYS = 'camelize'
+JSON_API_FIELD_NAMES = 'camelize'
 JSON_API_FORMAT_TYPES = 'camelize'
 JSON_API_PLURALIZE_TYPES = True
+
 REST_FRAMEWORK.update({
     'PAGE_SIZE': 1,
 })

@@ -1,11 +1,19 @@
-from django.core.urlresolvers import reverse
-
 import pytest
-from example.tests.utils import dump_json, redump_json
+from django.urls import reverse
+
+try:
+    from unittest import mock
+except ImportError:
+    import mock
+
 
 pytestmark = pytest.mark.django_db
 
 
+@mock.patch(
+    'rest_framework_json_api.utils'
+    '.get_default_included_resources_from_serializer',
+    new=lambda s: [])
 def test_pagination_with_single_entry(single_entry, client):
 
     expected = {
@@ -28,6 +36,12 @@ def test_pagination_with_single_entry(single_entry, client):
                     "blog": {
                         "data": {"type": "blogs", "id": "1"}
                     },
+                    "blogHyperlinked": {
+                        "links": {
+                            "related": "http://testserver/entries/1/blog",
+                            "self": "http://testserver/entries/1/relationships/blog_hyperlinked",
+                        }
+                    },
                     "authors": {
                         "meta": {"count": 1},
                         "data": [{"type": "authors", "id": "1"}]
@@ -36,17 +50,48 @@ def test_pagination_with_single_entry(single_entry, client):
                         "meta": {"count": 1},
                         "data": [{"type": "comments", "id": "1"}]
                     },
+                    "commentsHyperlinked": {
+                        "links": {
+                            "related": "http://testserver/entries/1/comments",
+                            "self": "http://testserver/entries/1/relationships/comments_hyperlinked"
+                        }
+                    },
                     "suggested": {
-                        "data": []
+                        "data": [],
+                        "links": {
+                            "related": "http://testserver/entries/1/suggested/",
+                            "self": "http://testserver/entries/1/relationships/suggested"
+                        }
+                    },
+                    "suggestedHyperlinked": {
+                        "links": {
+                            "related": "http://testserver/entries/1/suggested/",
+                            "self": "http://testserver/entries/1"
+                                    "/relationships/suggested_hyperlinked"
+                        }
+                    },
+                    "featuredHyperlinked": {
+                        "links": {
+                            "related": "http://testserver/entries/1/featured",
+                            "self": "http://testserver/entries/1/relationships/featured_hyperlinked"
+                        }
+                    },
+                    "tags": {
+                        "data": [
+                            {
+                                "id": "1",
+                                "type": "taggedItems"
+                            }
+                        ]
                     }
                 }
             }],
         "links": {
-                    "first": "http://testserver/entries?page=1",
-                    "last": "http://testserver/entries?page=1",
-                    "next": None,
-                    "prev": None,
-                },
+            "first": "http://testserver/entries?page=1",
+            "last": "http://testserver/entries?page=1",
+            "next": None,
+            "prev": None,
+        },
         "meta":
         {
             "pagination":
@@ -59,7 +104,5 @@ def test_pagination_with_single_entry(single_entry, client):
     }
 
     response = client.get(reverse("entry-list"))
-    content_dump = redump_json(response.content)
-    expected_dump = dump_json(expected)
 
-    assert content_dump == expected_dump
+    assert expected == response.json()

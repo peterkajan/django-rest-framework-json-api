@@ -2,14 +2,34 @@
 
 import factory
 from faker import Factory as FakerFactory
-from example.models import Blog, Author, AuthorBio, Entry, Comment
+
+from example.models import (
+    ArtProject,
+    Author,
+    AuthorBio,
+    AuthorType,
+    Blog,
+    Comment,
+    Company,
+    Entry,
+    ResearchProject,
+    TaggedItem
+)
 
 faker = FakerFactory.create()
 faker.seed(983843)
 
+
 class BlogFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = Blog
+
+    name = factory.LazyAttribute(lambda x: faker.name())
+
+
+class AuthorTypeFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = AuthorType
 
     name = factory.LazyAttribute(lambda x: faker.name())
 
@@ -22,6 +42,8 @@ class AuthorFactory(factory.django.DjangoModelFactory):
     email = factory.LazyAttribute(lambda x: faker.email())
 
     bio = factory.RelatedFactory('example.factories.AuthorBioFactory', 'author')
+    type = factory.SubFactory(AuthorTypeFactory)
+
 
 class AuthorBioFactory(factory.django.DjangoModelFactory):
     class Meta:
@@ -58,3 +80,42 @@ class CommentFactory(factory.django.DjangoModelFactory):
     body = factory.LazyAttribute(lambda x: faker.text())
     author = factory.SubFactory(AuthorFactory)
 
+
+class TaggedItemFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = TaggedItem
+
+    content_object = factory.SubFactory(EntryFactory)
+    tag = factory.LazyAttribute(lambda x: faker.word())
+
+
+class ArtProjectFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = ArtProject
+
+    topic = factory.LazyAttribute(lambda x: faker.catch_phrase())
+    artist = factory.LazyAttribute(lambda x: faker.name())
+
+
+class ResearchProjectFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = ResearchProject
+
+    topic = factory.LazyAttribute(lambda x: faker.catch_phrase())
+    supervisor = factory.LazyAttribute(lambda x: faker.name())
+
+
+class CompanyFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = Company
+
+    name = factory.LazyAttribute(lambda x: faker.company())
+    current_project = factory.SubFactory(ArtProjectFactory)
+
+    @factory.post_generation
+    def future_projects(self, create, extracted, **kwargs):
+        if not create:
+            return
+        if extracted:
+            for project in extracted:
+                self.future_projects.add(project)

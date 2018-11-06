@@ -1,8 +1,7 @@
 from datetime import datetime
-from django.core.urlresolvers import reverse
 
 import pytest
-from example.tests.utils import dump_json, redump_json
+from django.urls import reverse
 
 pytestmark = pytest.mark.django_db
 
@@ -18,6 +17,11 @@ def test_top_level_meta_for_list_view(blog, client):
             },
             "links": {
                 "self": 'http://testserver/blogs/1'
+            },
+            "relationships": {
+                "tags": {
+                    "data": []
+                }
             },
             "meta": {
                 "copyright": datetime.now().year
@@ -36,10 +40,8 @@ def test_top_level_meta_for_list_view(blog, client):
     }
 
     response = client.get(reverse("blog-list"))
-    content_dump = redump_json(response.content)
-    expected_dump = dump_json(expected)
 
-    assert content_dump == expected_dump
+    assert expected == response.json()
 
 
 def test_top_level_meta_for_detail_view(blog, client):
@@ -50,6 +52,11 @@ def test_top_level_meta_for_detail_view(blog, client):
             "id": "1",
             "attributes": {
                 "name": blog.name
+            },
+            "relationships": {
+                "tags": {
+                    "data": []
+                }
             },
             "links": {
                 "self": "http://testserver/blogs/1"
@@ -64,7 +71,5 @@ def test_top_level_meta_for_detail_view(blog, client):
     }
 
     response = client.get(reverse("blog-detail", kwargs={'pk': blog.pk}))
-    content_dump = redump_json(response.content)
-    expected_dump = dump_json(expected)
 
-    assert content_dump == expected_dump
+    assert expected == response.json()
